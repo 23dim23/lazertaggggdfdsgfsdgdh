@@ -23,7 +23,7 @@ export default function Footer({ contacts }: FooterProps) {
               </span>
             </div>
             <p className="mt-3 text-xs text-zinc-500 leading-relaxed max-w-xs">
-              Лучшие космические лазертаг-дни рождения и командные квесты под ключ в Москве. Полная безопасность, новые сценарии и море драйва!
+              Лучшие лесные и тактические лазертаг-дни рождения и командные квесты под ключ в Сочи и Адлере. Полная безопасность, новые сценарии и море драйва!
             </p>
           </div>
 
@@ -75,7 +75,7 @@ export default function Footer({ contacts }: FooterProps) {
         <div className="mt-8 flex flex-col sm:flex-row items-center justify-between text-[10px] text-zinc-600 font-bold uppercase tracking-widest gap-4">
           <span>© {new Date().getFullYear()} ЛАЗЕРТАГ КВЕСТ. ВСЕ ПРАВА ЗАЩИЩЕНЫ.</span>
           <span className="text-[9px] bg-zinc-900 border border-zinc-850 px-2.5 py-1 rounded text-zinc-500 hover:text-cyan-400 cursor-pointer">
-            Москва, Россия 🇷🇺
+            Сочи, Россия 🇷🇺
           </span>
         </div>
       </div>
