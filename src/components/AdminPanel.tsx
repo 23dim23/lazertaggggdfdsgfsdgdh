@@ -79,7 +79,19 @@ export default function AdminPanel({
         setIsAuthenticated(true);
         setErrorMsg('');
       } catch (err: any) {
-        setErrorMsg('Ошибка авторизации в базе данных: ' + err.message);
+        if (err.message?.includes('admin-restricted-operation') || err.code === 'auth/admin-restricted-operation') {
+          setErrorMsg(
+            'В консоли Firebase отключена анонимная авторизация.\n\n' +
+            'Пожалуйста, включите её для корректной работы:\n' +
+            '1. Откройте Firebase Console: https://console.firebase.google.com/\n' +
+            '2. Перейдите в раздел "Authentication" -> "Sign-in method"\n' +
+            '3. Нажмите "Add new provider" -> выберите "Anonymous" (Анонимный)\n' +
+            '4. Включите переключатель и сохраните.\n\n' +
+            'После этого обновите страницу и попробуйте войти снова.'
+          );
+        } else {
+          setErrorMsg('Ошибка авторизации в базе данных: ' + err.message);
+        }
       }
     } else {
       setErrorMsg('Неверный пароль администратора.');
@@ -344,7 +356,7 @@ export default function AdminPanel({
               {errorMsg && (
                 <div className="flex items-start gap-2 text-xs text-rose-400 bg-rose-950/20 border border-rose-900/40 p-3 rounded-lg">
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>{errorMsg}</span>
+                  <span className="whitespace-pre-line text-left">{errorMsg}</span>
                 </div>
               )}
 
