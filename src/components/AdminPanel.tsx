@@ -5,8 +5,6 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Section, Service, Review, ContactInfo, AdminSettings } from '../types';
-import { auth, loginWithGoogle, logoutUser } from '../lib/firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
 
 interface AdminPanelProps {
   settings: AdminSettings;
@@ -26,16 +24,12 @@ export default function AdminPanel({
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  const [currentUser, setCurrentUser] = useState<User | null>(auth.currentUser);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      if (user) {
-        setIsAuthenticated(true);
-      }
-    });
-    return () => unsubscribe();
+    const session = localStorage.getItem('admin_session');
+    if (session === 'true') {
+      setIsAuthenticated(true);
+    }
   }, []);
 
   const [activeTab, setActiveTab] = useState<'sections' | 'services' | 'reviews' | 'contacts'>('sections');
@@ -71,16 +65,12 @@ export default function AdminPanel({
   });
 
   // Handle Admin login
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (password === 'laserkvest2026' || password === 'admin' || password === '1234') {
-      try {
-        await loginWithGoogle();
-        setIsAuthenticated(true);
-        setErrorMsg('');
-      } catch (err: any) {
-        setErrorMsg('Ошибка авторизации через Google: ' + err.message);
-      }
+      setIsAuthenticated(true);
+      setErrorMsg('');
+      localStorage.setItem('admin_session', 'true');
     } else {
       setErrorMsg('Неверный пароль администратора.');
     }
@@ -340,7 +330,7 @@ export default function AdminPanel({
                   className="w-full bg-zinc-950 text-white text-xs border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-cyan-500"
                 />
                 <span className="block text-[10px] text-zinc-500 mt-2 leading-relaxed text-center">
-                  * После ввода пароля откроется быстрое окно подтверждения через Google для безопасного сохранения данных.
+                  * Введите верный пароль для включения режима редактирования.
                 </span>
               </div>
 
@@ -378,36 +368,29 @@ export default function AdminPanel({
               <h3 className="text-lg font-black text-white flex items-center gap-2">
                 Панель управления
                 <span className="text-[9px] bg-cyan-950/50 text-cyan-400 px-2 py-0.5 border border-cyan-800/40 rounded uppercase font-black">
-                  Firebase
+                  ОБЛАКО
                 </span>
               </h3>
               <p className="text-xs text-zinc-400">
-                {currentUser ? (
-                  <span className="text-emerald-400 font-bold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                    Режим редактирования (Облачная синхронизация с Firestore)
-                  </span>
-                ) : (
-                  <span className="text-yellow-500 font-bold">
-                    ⚠️ Режим просмотра (Изменения сохраняются локально)
-                  </span>
-                )}
+                <span className="text-emerald-400 font-bold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 " />
+                  Режим редактирования (Синхронизация с Firestore)
+                </span>
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2.5 self-stretch sm:self-auto w-full sm:w-auto">
-            {currentUser && (
-              <button
-                onClick={async () => {
-                  await logoutUser();
-                  setIsAuthenticated(false);
-                }}
-                className="bg-zinc-900 border border-zinc-800 text-xs text-zinc-400 hover:text-white px-3.5 py-2.5 rounded-xl font-bold transition-all"
-              >
-                Выйти
-              </button>
-            )}
+            <button
+              onClick={() => {
+                localStorage.removeItem('admin_session');
+                setIsAuthenticated(false);
+                onClose();
+              }}
+              className="bg-zinc-900 border border-zinc-800 text-xs text-zinc-400 hover:text-white px-3.5 py-2.5 rounded-xl font-bold transition-all"
+            >
+              Выйти
+            </button>
             <button
               onClick={onClose}
               className="bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all"

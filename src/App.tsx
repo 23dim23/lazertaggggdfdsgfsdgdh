@@ -17,7 +17,6 @@ import {
   INITIAL_REELS, 
   DEFAULT_CONTACTS 
 } from './data';
-import { auth } from './lib/firebase';
 import { 
   testFirestoreConnection, 
   getSections, 
@@ -81,7 +80,7 @@ export default function App() {
   const handleSaveAdminSettings = async (newSettings: AdminSettings) => {
     setIsSaving(true);
     try {
-      const isAdmin = auth.currentUser !== null;
+      const isAdmin = localStorage.getItem('admin_session') === 'true';
 
       // Update state locally first so UI is snappy
       setServices(newSettings.services);
