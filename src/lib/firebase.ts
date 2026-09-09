@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, signInAnonymously } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -73,6 +73,17 @@ export async function logoutUser() {
     await signOut(auth);
   } catch (error) {
     console.error('Sign Out Error:', error);
+    throw error;
+  }
+}
+
+// Simple Helper to sign in anonymously
+export async function loginAnonymously() {
+  try {
+    const result = await signInAnonymously(auth);
+    return result.user;
+  } catch (error) {
+    console.error('Anonymous Auth Login Error:', error);
     throw error;
   }
 }

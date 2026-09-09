@@ -4,9 +4,10 @@ import { ContactInfo } from '../types';
 
 interface FooterProps {
   contacts: ContactInfo;
+  onOpenAdmin?: () => void;
 }
 
-export default function Footer({ contacts }: FooterProps) {
+export default function Footer({ contacts, onOpenAdmin }: FooterProps) {
   return (
     <footer className="bg-zinc-950 border-t border-zinc-900 py-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -73,8 +74,18 @@ export default function Footer({ contacts }: FooterProps) {
         </div>
 
         <div className="mt-8 flex flex-col sm:flex-row items-center justify-between text-[10px] text-zinc-600 font-bold uppercase tracking-widest gap-4">
-          <span>© {new Date().getFullYear()} ЛАЗЕРТАГ КВЕСТ. ВСЕ ПРАВА ЗАЩИЩЕНЫ.</span>
-          <span className="text-[9px] bg-zinc-900 border border-zinc-850 px-2.5 py-1 rounded text-zinc-500 hover:text-cyan-400 cursor-pointer">
+          <span 
+            onDoubleClick={onOpenAdmin} 
+            className="cursor-default select-none hover:text-zinc-500 transition-colors"
+            title="Панель администратора (двойной клик)"
+          >
+            © {new Date().getFullYear()} ЛАЗЕРТАГ КВЕСТ. ВСЕ ПРАВА ЗАЩИЩЕНЫ.
+          </span>
+          <span 
+            onDoubleClick={onOpenAdmin}
+            className="text-[9px] bg-zinc-900 border border-zinc-850 px-2.5 py-1 rounded text-zinc-500 hover:text-cyan-400 cursor-pointer select-none"
+            title="Панель администратора (двойной клик)"
+          >
             Сочи, Россия 🇷🇺
           </span>
         </div>

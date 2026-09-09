@@ -70,16 +70,6 @@ export default function Navbar({
 
           {/* Action Button cluster */}
           <div className="hidden sm:flex items-center gap-3">
-            {/* Admin entry point */}
-            <button
-              onClick={onOpenAdmin}
-              className="px-3 py-2 rounded-xl text-zinc-500 hover:text-cyan-400 hover:bg-zinc-900/60 transition-colors text-xs font-bold flex items-center gap-1.5 border border-transparent hover:border-zinc-800/85"
-              title="Панель администратора"
-            >
-              <Settings className="w-4 h-4" />
-              <span>Админка</span>
-            </button>
-
             {/* Main Booking Button */}
             <button
               onClick={onOpenBooking}
@@ -90,16 +80,8 @@ export default function Navbar({
             </button>
           </div>
 
-          {/* Mobile menu and admin triggers */}
+          {/* Mobile menu triggers */}
           <div className="flex items-center gap-2 lg:hidden">
-            <button
-              onClick={onOpenAdmin}
-              className="p-2 text-zinc-500 hover:text-cyan-400 hover:bg-zinc-900 rounded-lg"
-              title="Админка"
-            >
-              <Settings className="w-5 h-5" />
-            </button>
-
             <button
               onClick={() => setIsOpen(!isOpen)}
               className="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-900 focus:outline-none"

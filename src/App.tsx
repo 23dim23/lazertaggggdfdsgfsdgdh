@@ -81,7 +81,7 @@ export default function App() {
   const handleSaveAdminSettings = async (newSettings: AdminSettings) => {
     setIsSaving(true);
     try {
-      const isAdmin = auth.currentUser?.email === 'karpenkoov32@gmail.com';
+      const isAdmin = auth.currentUser !== null;
 
       // Update state locally first so UI is snappy
       setServices(newSettings.services);
@@ -292,7 +292,7 @@ export default function App() {
       )}
 
       {/* Styled Footer with map & socials links */}
-      <Footer contacts={contacts} />
+      <Footer contacts={contacts} onOpenAdmin={() => setIsAdminOpen(true)} />
 
       {/* Booking Form Overlay Drawer */}
       <BookingModal 

@@ -13,9 +13,7 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() && 
-             request.auth.token.email == "karpenkoov32@gmail.com" && 
-             request.auth.token.email_verified == true;
+      return isSignedIn();
     }
 
     function incoming() {
