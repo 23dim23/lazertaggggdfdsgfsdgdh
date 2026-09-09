@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Section, Service, Review, ContactInfo, AdminSettings } from '../types';
-import { auth, loginAnonymously, logoutUser } from '../lib/firebase';
+import { auth, loginWithGoogle, logoutUser } from '../lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 
 interface AdminPanelProps {
@@ -75,23 +75,11 @@ export default function AdminPanel({
     e.preventDefault();
     if (password === 'laserkvest2026' || password === 'admin' || password === '1234') {
       try {
-        await loginAnonymously();
+        await loginWithGoogle();
         setIsAuthenticated(true);
         setErrorMsg('');
       } catch (err: any) {
-        if (err.message?.includes('admin-restricted-operation') || err.code === 'auth/admin-restricted-operation') {
-          setErrorMsg(
-            'В консоли Firebase отключена анонимная авторизация.\n\n' +
-            'Пожалуйста, включите её для корректной работы:\n' +
-            '1. Откройте Firebase Console: https://console.firebase.google.com/\n' +
-            '2. Перейдите в раздел "Authentication" -> "Sign-in method"\n' +
-            '3. Нажмите "Add new provider" -> выберите "Anonymous" (Анонимный)\n' +
-            '4. Включите переключатель и сохраните.\n\n' +
-            'После этого обновите страницу и попробуйте войти снова.'
-          );
-        } else {
-          setErrorMsg('Ошибка авторизации в базе данных: ' + err.message);
-        }
+        setErrorMsg('Ошибка авторизации через Google: ' + err.message);
       }
     } else {
       setErrorMsg('Неверный пароль администратора.');
@@ -351,6 +339,9 @@ export default function AdminPanel({
                   placeholder="Введите пароль..."
                   className="w-full bg-zinc-950 text-white text-xs border border-zinc-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-1 focus:ring-cyan-500"
                 />
+                <span className="block text-[10px] text-zinc-500 mt-2 leading-relaxed text-center">
+                  * После ввода пароля откроется быстрое окно подтверждения через Google для безопасного сохранения данных.
+                </span>
               </div>
 
               {errorMsg && (
