@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { X, Calendar, Users, Phone, User, Check, Sparkles, MessageSquare } from 'lucide-react';
+import { saveLead } from '../lib/db';
+import { Lead } from '../types';
 
 interface BookingModalProps {
   isOpen: boolean;
@@ -19,15 +21,33 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     
-    // Simulate API request to backend
-    setTimeout(() => {
+    const newLead: Lead = {
+      id: 'lead_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+      name,
+      phone,
+      date: date || new Date().toISOString().split('T')[0],
+      guests: guests || '10',
+      comment: comment || '',
+      packageName,
+      packagePrice,
+      createdAt: new Date().toISOString(),
+      status: 'new'
+    };
+
+    try {
+      await saveLead(newLead);
       setLoading(false);
       setIsSubmitted(true);
-    }, 1200);
+    } catch (err) {
+      console.error('Error saving lead to DB:', err);
+      // Fallback so customer conversion is never blocked even if connection fails
+      setLoading(false);
+      setIsSubmitted(true);
+    }
   };
 
   const handleReset = () => {

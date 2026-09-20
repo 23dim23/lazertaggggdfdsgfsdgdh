@@ -2,12 +2,13 @@ import {
   collection, doc, getDocs, getDoc, setDoc, deleteDoc, getDocFromServer 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
-import { Section, Service, Review, ContactInfo } from '../types';
+import { Section, Service, Review, ContactInfo, Reel, Lead } from '../types';
 import { 
   INITIAL_SECTIONS, 
   INITIAL_SERVICES, 
   INITIAL_REVIEWS, 
-  DEFAULT_CONTACTS 
+  DEFAULT_CONTACTS,
+  INITIAL_REELS
 } from '../data';
 
 // Validate Connection on Boot as requested by guidelines
@@ -182,5 +183,93 @@ export async function saveContacts(contacts: ContactInfo): Promise<void> {
     await setDoc(doc(db, 'config', 'contacts'), contacts);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteSection(id: string): Promise<void> {
+  const path = `sections/${id}`;
+  try {
+    await deleteDoc(doc(db, 'sections', id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+// --- Leads DB Sync ---
+export async function getLeads(): Promise<Lead[]> {
+  const colPath = 'leads';
+  try {
+    const querySnapshot = await getDocs(collection(db, colPath));
+    const leadsList: Lead[] = [];
+    querySnapshot.forEach((docSnap) => {
+      leadsList.push(docSnap.data() as Lead);
+    });
+    return leadsList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, colPath);
+    return [];
+  }
+}
+
+export async function saveLead(lead: Lead): Promise<void> {
+  const path = `leads/${lead.id}`;
+  try {
+    await setDoc(doc(db, 'leads', lead.id), lead);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteLead(id: string): Promise<void> {
+  const path = `leads/${id}`;
+  try {
+    await deleteDoc(doc(db, 'leads', id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+// --- Reels DB Sync ---
+export async function getReels(): Promise<Reel[]> {
+  const colPath = 'reels';
+  try {
+    const querySnapshot = await getDocs(collection(db, colPath));
+    if (querySnapshot.empty) {
+      console.log('Reels collection is empty. Seeding defaults...');
+      for (const rl of INITIAL_REELS) {
+        try {
+          await setDoc(doc(db, colPath, rl.id), rl);
+        } catch (writeErr) {
+          console.warn(`Seeding reel ${rl.id} skipped (likely unauthorized):`, writeErr);
+        }
+      }
+      return INITIAL_REELS;
+    }
+    const reelsList: Reel[] = [];
+    querySnapshot.forEach((docSnap) => {
+      reelsList.push(docSnap.data() as Reel);
+    });
+    return reelsList;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, colPath);
+    return INITIAL_REELS;
+  }
+}
+
+export async function saveReel(reel: Reel): Promise<void> {
+  const path = `reels/${reel.id}`;
+  try {
+    await setDoc(doc(db, 'reels', reel.id), reel);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteReel(id: string): Promise<void> {
+  const path = `reels/${id}`;
+  try {
+    await deleteDoc(doc(db, 'reels', id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }

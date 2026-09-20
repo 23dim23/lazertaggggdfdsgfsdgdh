@@ -28,6 +28,30 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    function isValidReel(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.title is string && data.title.size() <= 300 &&
+             data.videoUrl is string && data.videoUrl.size() <= 1000 &&
+             data.thumbnailUrl is string && data.thumbnailUrl.size() <= 1000 &&
+             data.likes is int && data.likes >= 0 &&
+             data.plays is string && data.plays.size() <= 100 &&
+             data.duration is string && data.duration.size() <= 30 &&
+             data.tag is string && data.tag.size() <= 100;
+    }
+
+    function isValidLead(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() <= 200 &&
+             data.phone is string && data.phone.size() <= 100 &&
+             data.date is string && data.date.size() <= 50 &&
+             data.guests is string && data.guests.size() <= 50 &&
+             data.comment is string && data.comment.size() <= 3000 &&
+             (!data.keys().contains('packageName') || data.packageName is string) &&
+             (!data.keys().contains('packagePrice') || data.packagePrice is int || data.packagePrice is float || data.packagePrice is number) &&
+             data.createdAt is string && data.createdAt.size() <= 100 &&
+             data.status is string && data.status in ['new', 'processing', 'completed', 'canceled'];
+    }
+
     // 1. Sections Collection Rules
     match /sections/{sectionId} {
       allow read: if true;
@@ -56,6 +80,19 @@ service cloud.firestore {
     match /config/contacts {
       allow read: if true;
       allow write: if isAdmin();
+    }
+
+    // 5. Reels Collection Rules
+    match /reels/{reelId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(reelId) && isValidReel(incoming());
+    }
+
+    // 6. Leads Collection Rules
+    match /leads/{leadId} {
+      allow read: if isAdmin() && isValidId(leadId);
+      allow create: if isValidId(leadId) && isValidLead(incoming());
+      allow update, delete: if isAdmin() && isValidId(leadId);
     }
   }
 }

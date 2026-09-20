@@ -65,9 +65,44 @@
         "yandexMapWidgetUrl": { "type": "string" },
         "vkUrl": { "type": "string" },
         "telegramUrl": { "type": "string" },
-        "instagramUrl": { "type": "string" }
+        "instagramUrl": { "type": "string" },
+        "yandexMetrikaId": { "type": "string" }
       },
       "required": ["phone", "email", "address", "workingHours", "yandexMapWidgetUrl"]
+    },
+    "Reel": {
+      "title": "Reel",
+      "description": "Vertical short video clip / VK Clip or Reels widget item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "thumbnailUrl": { "type": "string" },
+        "likes": { "type": "number" },
+        "plays": { "type": "string" },
+        "duration": { "type": "string" },
+        "tag": { "type": "string" }
+      },
+      "required": ["id", "title", "videoUrl", "thumbnailUrl", "likes", "plays", "duration", "tag"]
+    },
+    "Lead": {
+      "title": "Lead",
+      "description": "Customer booking query from the website form",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "date": { "type": "string" },
+        "guests": { "type": "string" },
+        "comment": { "type": "string" },
+        "packageName": { "type": "string" },
+        "packagePrice": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["new", "processing", "completed", "canceled"] }
+      },
+      "required": ["id", "name", "phone", "date", "guests", "comment", "createdAt", "status"]
     }
   },
   "firestore": {
@@ -86,6 +121,14 @@
     "/config/contacts": {
       "schema": { "$ref": "#/entities/ContactInfo" },
       "description": "Global club contact details and map settings"
+    },
+    "/reels/{reelId}": {
+      "schema": { "$ref": "#/entities/Reel" },
+      "description": "Interactive vertical short video clips"
+    },
+    "/leads/{leadId}": {
+      "schema": { "$ref": "#/entities/Lead" },
+      "description": "Inbound customer bookings and requests"
     }
   }
 }

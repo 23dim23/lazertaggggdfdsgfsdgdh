@@ -1,16 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Lock, Settings, Eye, EyeOff, Edit, Plus, Trash2, FileSpreadsheet, Check, 
-  X, AlertCircle, Save, PlusCircle, RefreshCw, Upload, Sparkles, MapPin, MessageSquare 
+  X, AlertCircle, Save, PlusCircle, RefreshCw, Upload, Sparkles, MapPin, MessageSquare,
+  Play, Video, Calendar, Clock, User, Phone, Users, CheckCircle2, AlertTriangle, FileDown, Download
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Section, Service, Review, ContactInfo, AdminSettings } from '../types';
+import { Section, Service, Review, ContactInfo, AdminSettings, Reel, Lead } from '../types';
+import { getLeads, saveLead, deleteLead } from '../lib/db';
 
 interface AdminPanelProps {
   settings: AdminSettings;
-  onSaveSettings: (newSettings: AdminSettings) => void;
+  onSaveSettings: (newSettings: AdminSettings, newSections?: Section[], newReels?: Reel[]) => void;
   sections: Section[];
   onSaveSections: (newSections: Section[]) => void;
+  reels: Reel[];
   onClose: () => void;
 }
 
@@ -19,6 +22,7 @@ export default function AdminPanel({
   onSaveSettings, 
   sections, 
   onSaveSections, 
+  reels,
   onClose 
 }: AdminPanelProps) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -32,7 +36,24 @@ export default function AdminPanel({
     }
   }, []);
 
-  const [activeTab, setActiveTab] = useState<'sections' | 'services' | 'reviews' | 'contacts'>('sections');
+  // Fetch leads dynamically when active tab is 'leads'
+  useEffect(() => {
+    if (isAuthenticated && activeTab === 'leads') {
+      setIsLoadingLeads(true);
+      getLeads()
+        .then((data) => {
+          setLocalLeads(data);
+        })
+        .catch((err) => {
+          console.error('Error fetching leads:', err);
+        })
+        .finally(() => {
+          setIsLoadingLeads(false);
+        });
+    }
+  }, [isAuthenticated, activeTab]);
+
+  const [activeTab, setActiveTab] = useState<'sections' | 'services' | 'reviews' | 'contacts' | 'leads' | 'reels'>('sections');
 
   // Excel mapping and import states
   const [excelFile, setExcelFile] = useState<File | null>(null);
@@ -52,8 +73,16 @@ export default function AdminPanel({
   const [localReviews, setLocalReviews] = useState<Review[]>([...settings.reviews]);
   const [localContacts, setLocalContacts] = useState<ContactInfo>({ ...settings.contacts });
   const [localSections, setLocalSections] = useState<Section[]>([...sections]);
+  const [localReels, setLocalReels] = useState<Reel[]>([...reels]);
+  const [localLeads, setLocalLeads] = useState<Lead[]>([]);
+  const [isLoadingLeads, setIsLoadingLeads] = useState(false);
 
-  // Form states for adding/editing services & reviews
+  // Form states for adding/editing sections, services, reviews, reels, leads
+  const [showSectionAddForm, setShowSectionAddForm] = useState(false);
+  const [sectionForm, setSectionForm] = useState<Partial<Section>>({
+    id: '', title: '', heroTitle: '', heroSubtitle: '', description: '', contentMarkdown: '', isActive: false
+  });
+
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [serviceForm, setServiceForm] = useState<Partial<Service>>({
     name: '', category: 'Основное', description: '', price: 0, oldPrice: undefined, duration: '', availability: ''
@@ -63,6 +92,14 @@ export default function AdminPanel({
   const [reviewForm, setReviewForm] = useState<Partial<Review>>({
     author: '', rating: 5, text: '', source: 'manual'
   });
+
+  const [editingReelId, setEditingReelId] = useState<string | null>(null);
+  const [reelForm, setReelForm] = useState<Partial<Reel>>({
+    title: '', videoUrl: '', thumbnailUrl: '', likes: 0, plays: '0', duration: '0:15', tag: 'Общее'
+  });
+
+  const [leadsSearchQuery, setLeadsSearchQuery] = useState('');
+  const [leadsStatusFilter, setLeadsStatusFilter] = useState<'all' | 'new' | 'processing' | 'completed' | 'canceled'>('all');
 
   // Handle Admin login
   const handleLogin = (e: React.FormEvent) => {
@@ -88,6 +125,160 @@ export default function AdminPanel({
     setLocalSections(prev => prev.map(sec => 
       sec.id === id ? { ...sec, [field]: value } : sec
     ));
+  };
+
+  // Add a new custom website section
+  const handleAddSection = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sectionForm.id || !sectionForm.title) {
+      alert('Заполните ID раздела и заголовок вкладки!');
+      return;
+    }
+
+    const cleanId = sectionForm.id.trim().toLowerCase().replace(/[^a-z0-9-_]/g, '');
+    if (cleanId === 'home') {
+      alert('Идентификатор "home" зарезервирован.');
+      return;
+    }
+    if (localSections.some(sec => sec.id === cleanId)) {
+      alert('Раздел с таким идентификатором уже существует!');
+      return;
+    }
+
+    const newSec: Section = {
+      id: cleanId,
+      title: sectionForm.title,
+      heroTitle: sectionForm.heroTitle || '',
+      heroSubtitle: sectionForm.heroSubtitle || '',
+      description: sectionForm.description || '',
+      contentMarkdown: sectionForm.contentMarkdown || '',
+      isActive: sectionForm.isActive ?? false
+    };
+
+    setLocalSections(prev => [...prev, newSec]);
+    setSectionForm({
+      id: '', title: '', heroTitle: '', heroSubtitle: '', description: '', contentMarkdown: '', isActive: false
+    });
+    setShowSectionAddForm(false);
+  };
+
+  // Delete a website section
+  const handleDeleteSection = (id: string) => {
+    if (id === 'home') {
+      alert('Нельзя удалить главную страницу!');
+      return;
+    }
+    if (window.confirm(`Вы действительно хотите безвозвратно удалить раздел "${id}" с сайта?`)) {
+      setLocalSections(prev => prev.filter(sec => sec.id !== id));
+    }
+  };
+
+  // Reels / VK Clips helper handlers
+  const handleSaveReelForm = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reelForm.title || !reelForm.videoUrl) {
+      alert('Заполните название и укажите ссылку на видео!');
+      return;
+    }
+
+    let defaultThumb = reelForm.thumbnailUrl;
+    if (!defaultThumb) {
+      defaultThumb = 'https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&q=80&w=300';
+    }
+
+    if (editingReelId) {
+      setLocalReels(prev => prev.map(rl => 
+        rl.id === editingReelId ? {
+          ...rl,
+          title: reelForm.title || '',
+          videoUrl: reelForm.videoUrl || '',
+          thumbnailUrl: defaultThumb || '',
+          likes: reelForm.likes || 0,
+          plays: reelForm.plays || '0',
+          duration: reelForm.duration || '0:15',
+          tag: reelForm.tag || 'Общее'
+        } : rl
+      ));
+      setEditingReelId(null);
+    } else {
+      const newReel: Reel = {
+        id: 'reel_' + Date.now(),
+        title: reelForm.title,
+        videoUrl: reelForm.videoUrl,
+        thumbnailUrl: defaultThumb,
+        likes: reelForm.likes || 0,
+        plays: reelForm.plays || '0',
+        duration: reelForm.duration || '0:15',
+        tag: reelForm.tag || 'Общее'
+      };
+      setLocalReels(prev => [...prev, newReel]);
+    }
+
+    setReelForm({ title: '', videoUrl: '', thumbnailUrl: '', likes: 0, plays: '0', duration: '0:15', tag: 'Общее' });
+  };
+
+  const handleEditReel = (reel: Reel) => {
+    setEditingReelId(reel.id);
+    setReelForm(reel);
+  };
+
+  const handleDeleteReel = (id: string) => {
+    if (window.confirm('Удалить этот видео-клип?')) {
+      setLocalReels(prev => prev.filter(r => r.id !== id));
+    }
+  };
+
+  // Leads Actions
+  const handleUpdateLeadStatus = async (leadId: string, newStatus: 'new' | 'processing' | 'completed' | 'canceled') => {
+    const lead = localLeads.find(l => l.id === leadId);
+    if (!lead) return;
+
+    const updatedLead: Lead = { ...lead, status: newStatus };
+    setLocalLeads(prev => prev.map(l => l.id === leadId ? updatedLead : l));
+
+    try {
+      await saveLead(updatedLead);
+    } catch (err) {
+      console.error('Failed to update lead status in Firestore:', err);
+    }
+  };
+
+  const handleDeleteLead = async (leadId: string) => {
+    if (window.confirm('Вы действительно хотите навсегда удалить эту заявку?')) {
+      setLocalLeads(prev => prev.filter(l => l.id !== leadId));
+      try {
+        await deleteLead(leadId);
+      } catch (err) {
+        console.error('Failed to delete lead from Firestore:', err);
+      }
+    }
+  };
+
+  const handleExportLeadsToExcel = () => {
+    if (localLeads.length === 0) {
+      alert('Нет заявок для экспорта!');
+      return;
+    }
+
+    const formatted = localLeads.map((l, i) => ({
+      '№': i + 1,
+      'Имя': l.name,
+      'Телефон': l.phone,
+      'Дата игры': l.date,
+      'Количество гостей': l.guests,
+      'Пакет / Тариф': l.packageName || 'Общая заявка',
+      'Стоимость': l.packagePrice ? `${l.packagePrice} ₽` : 'Не указана',
+      'Комментарий': l.comment,
+      'Дата создания': new Date(l.createdAt).toLocaleString('ru-RU'),
+      'Статус': l.status === 'new' ? 'Новая' : 
+                l.status === 'processing' ? 'В обработке' : 
+                l.status === 'completed' ? 'Завершена' : 'Отменена'
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(formatted);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Заявки");
+    XLSX.writeFile(wb, `leads_export_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   // Excel file loader using xlsx
@@ -292,7 +483,7 @@ export default function AdminPanel({
       contacts: localContacts
     };
 
-    onSaveSettings(newSettings);
+    onSaveSettings(newSettings, localSections, localReels);
     alert('Все изменения сохранены успешно! Превью сайта обновлено.');
     onClose();
   };
@@ -458,6 +649,30 @@ export default function AdminPanel({
               <MapPin className="w-4 h-4" />
               Контакты и Карта
             </button>
+
+            <button
+              onClick={() => setActiveTab('reels')}
+              className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shrink-0 ${
+                activeTab === 'reels' 
+                  ? 'bg-cyan-500 text-black' 
+                  : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
+              }`}
+            >
+              <Video className="w-4 h-4" />
+              VK Клипы ({localReels.length})
+            </button>
+
+            <button
+              onClick={() => setActiveTab('leads')}
+              className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shrink-0 ${
+                activeTab === 'leads' 
+                  ? 'bg-cyan-500 text-black' 
+                  : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
+              }`}
+            >
+              <Calendar className="w-4 h-4" />
+              Заявки ({localLeads.length})
+            </button>
           </div>
 
           {/* Admin Content Area */}
@@ -466,18 +681,140 @@ export default function AdminPanel({
             {/* TAB 1: Sections Content & Visibility */}
             {activeTab === 'sections' && (
               <div className="space-y-6">
-                <div>
-                  <h4 className="text-sm font-black text-white uppercase tracking-wider mb-1">Редактор разделов главной страницы</h4>
-                  <p className="text-xs text-zinc-500">Включайте и выключайте разделы, редактируйте тексты и пакеты предложений для клиентов.</p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h4 className="text-sm font-black text-white uppercase tracking-wider mb-1">Редактор разделов главной страницы</h4>
+                    <p className="text-xs text-zinc-500">Включайте и выключайте разделы, редактируйте тексты и наполняйте страницы в тени перед публикацией.</p>
+                  </div>
+                  <button
+                    onClick={() => setShowSectionAddForm(!showSectionAddForm)}
+                    className="flex items-center gap-1.5 px-4 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-black rounded-xl text-xs font-bold transition-all shadow-lg shadow-cyan-500/10 self-start sm:self-center"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Создать раздел
+                  </button>
                 </div>
+
+                {/* Add Section Form dropdown */}
+                {showSectionAddForm && (
+                  <form onSubmit={handleAddSection} className="bg-zinc-950 border border-zinc-800 rounded-2xl p-5 space-y-4">
+                    <div className="flex items-center justify-between pb-3 border-b border-zinc-800/60">
+                      <h5 className="text-xs font-black text-white uppercase tracking-wider">Новый раздел сайта</h5>
+                      <button 
+                        type="button" 
+                        onClick={() => setShowSectionAddForm(false)} 
+                        className="text-zinc-500 hover:text-white transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-1">Уникальный ID (на латинице, например: corporativy)</label>
+                        <input
+                          type="text"
+                          required
+                          value={sectionForm.id || ''}
+                          onChange={(e) => setSectionForm(prev => ({ ...prev, id: e.target.value }))}
+                          placeholder="corporates"
+                          className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-1">Заголовок во вкладке навигации</label>
+                        <input
+                          type="text"
+                          required
+                          value={sectionForm.title || ''}
+                          onChange={(e) => setSectionForm(prev => ({ ...prev, title: e.target.value }))}
+                          placeholder="Корпоративы"
+                          className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-1">Главный заголовок (Hero Title)</label>
+                        <input
+                          type="text"
+                          value={sectionForm.heroTitle || ''}
+                          onChange={(e) => setSectionForm(prev => ({ ...prev, heroTitle: e.target.value }))}
+                          placeholder="Лучшие лазертаг-игры для компаний!"
+                          className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-1">Подзаголовок (Hero Subtitle)</label>
+                        <input
+                          type="text"
+                          value={sectionForm.heroSubtitle || ''}
+                          onChange={(e) => setSectionForm(prev => ({ ...prev, heroSubtitle: e.target.value }))}
+                          placeholder="Корпоратив, который запомнится навсегда..."
+                          className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-1">Основное наполнение страницы (Текст)</label>
+                      <textarea
+                        value={sectionForm.description || ''}
+                        onChange={(e) => setSectionForm(prev => ({ ...prev, description: e.target.value }))}
+                        placeholder="Опишите мероприятие, условия проведения, доступность и общие правила проведения..."
+                        rows={3}
+                        className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-cyan-500 resize-none"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-2">
+                      <input
+                        type="checkbox"
+                        id="new-section-isactive"
+                        checked={sectionForm.isActive || false}
+                        onChange={(e) => setSectionForm(prev => ({ ...prev, isActive: e.target.checked }))}
+                        className="rounded border-zinc-850 bg-zinc-900 text-cyan-500 focus:ring-0 focus:ring-offset-0 h-4 w-4"
+                      />
+                      <label htmlFor="new-section-isactive" className="text-xs text-zinc-300 select-none">Сделать активным (отображать на сайте)</label>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowSectionAddForm(false)}
+                        className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-xs font-bold transition-all"
+                      >
+                        Отмена
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-black rounded-xl text-xs font-bold transition-all"
+                      >
+                        Создать раздел
+                      </button>
+                    </div>
+                  </form>
+                )}
 
                 <div className="space-y-4">
                   {localSections.map((sec) => (
                     <div key={sec.id} className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-5">
                       <div className="flex items-center justify-between mb-4 pb-4 border-b border-zinc-800">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-black text-cyan-400 uppercase tracking-widest">[{sec.id.toUpperCase()}]</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-black text-cyan-400 uppercase tracking-widest bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded">
+                            {sec.id.toUpperCase()}
+                          </span>
                           <h5 className="text-sm font-black text-white">{sec.title}</h5>
+                          {sec.id !== 'home' && (
+                            <button
+                              onClick={() => handleDeleteSection(sec.id)}
+                              className="text-zinc-500 hover:text-red-400 p-1 rounded-lg hover:bg-zinc-850 transition-all ml-1"
+                              title="Удалить этот раздел"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
 
                         {/* Visibility controller */}
@@ -485,8 +822,8 @@ export default function AdminPanel({
                           onClick={() => toggleSectionActive(sec.id)}
                           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all ${
                             sec.isActive
-                              ? 'bg-emerald-950/40 text-emerald-400 border-emerald-500/30'
-                              : 'bg-zinc-950 text-zinc-500 border-zinc-850'
+                              ? 'bg-emerald-950/40 text-emerald-400 border-emerald-500/30 hover:bg-emerald-950/60'
+                              : 'bg-zinc-950 text-zinc-500 border-zinc-850 hover:bg-zinc-900'
                           }`}
                         >
                           {sec.isActive ? (
@@ -497,7 +834,7 @@ export default function AdminPanel({
                           ) : (
                             <>
                               <EyeOff className="w-3.5 h-3.5" />
-                              Выключен
+                              Скрыт (в тени)
                             </>
                           )}
                         </button>
@@ -1054,7 +1391,329 @@ export default function AdminPanel({
                     Скопируйте ссылку iframe («Поделиться» &rarr; «Встроить карту» &rarr; скопируйте параметр `src` ссылки)
                   </p>
                 </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Яндекс Метрика ID</label>
+                    <input
+                      type="text"
+                      placeholder="Например: 95483210"
+                      value={localContacts.yandexMetrikaId || ''}
+                      onChange={(e) => setLocalContacts(prev => ({ ...prev, yandexMetrikaId: e.target.value }))}
+                      className="w-full bg-zinc-950 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                    />
+                    <p className="text-[9px] text-zinc-500 mt-1">
+                      Оставьте пустым или введите числовой идентификатор вашего счетчика
+                    </p>
+                  </div>
+                </div>
               </form>
+            )}
+
+            {/* TAB 5: Reels / VK Clips Management */}
+            {activeTab === 'reels' && (
+              <div className="space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h4 className="text-sm font-black text-white uppercase tracking-wider mb-1">Менеджер VK Клипов и Reels</h4>
+                    <p className="text-xs text-zinc-500">Добавляйте ссылки на вертикальные ролики VK Клипы или Reels для отображения в интерактивном виджете.</p>
+                  </div>
+                </div>
+
+                {/* Form to Add / Edit Reel */}
+                <form onSubmit={handleSaveReelForm} className="bg-zinc-950 border border-zinc-850 rounded-2xl p-5 space-y-4">
+                  <h5 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Video className="w-4 h-4 text-cyan-400" />
+                    {editingReelId ? 'Редактировать видео-клип' : 'Добавить новый VK Клип / Reels'}
+                  </h5>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-1">Название ролика</label>
+                      <input
+                        type="text"
+                        required
+                        value={reelForm.title || ''}
+                        onChange={(e) => setReelForm(prev => ({ ...prev, title: e.target.value }))}
+                        placeholder="Супер-игра в лазертаг!"
+                        className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-1">Ссылка на VK Клип / Видео ролик</label>
+                      <input
+                        type="text"
+                        required
+                        value={reelForm.videoUrl || ''}
+                        onChange={(e) => setReelForm(prev => ({ ...prev, videoUrl: e.target.value }))}
+                        placeholder="https://vk.com/clip-123456_78910"
+                        className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-1">Ссылка на обложку (опционально)</label>
+                      <input
+                        type="text"
+                        value={reelForm.thumbnailUrl || ''}
+                        onChange={(e) => setReelForm(prev => ({ ...prev, thumbnailUrl: e.target.value }))}
+                        placeholder="https://images.unsplash.com/... (или пусто для авто)"
+                        className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-1">Продолжительность (формат 0:15)</label>
+                      <input
+                        type="text"
+                        value={reelForm.duration || '0:15'}
+                        onChange={(e) => setReelForm(prev => ({ ...prev, duration: e.target.value }))}
+                        className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-1">Тег / Категория</label>
+                      <select
+                        value={reelForm.tag || 'Общее'}
+                        onChange={(e) => setReelForm(prev => ({ ...prev, tag: e.target.value }))}
+                        className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                      >
+                        <option value="Общее">Общее</option>
+                        <option value="Праздник">Праздники</option>
+                        <option value="Атмосфера">Атмосфера</option>
+                        <option value="Отзывы">Отзывы</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    {editingReelId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingReelId(null);
+                          setReelForm({ title: '', videoUrl: '', thumbnailUrl: '', likes: 0, plays: '0', duration: '0:15', tag: 'Общее' });
+                        }}
+                        className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-xs font-bold transition-all"
+                      >
+                        Отмена
+                      </button>
+                    )}
+                    <button
+                      type="submit"
+                      className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-black rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+                    >
+                      <PlusCircle className="w-3.5 h-3.5" />
+                      {editingReelId ? 'Сохранить изменения' : 'Вставить ролик'}
+                    </button>
+                  </div>
+                </form>
+
+                {/* Reels list grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {localReels.map((rl) => (
+                    <div key={rl.id} className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-4 flex flex-col justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <div className="relative w-16 h-24 bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800 shrink-0">
+                          <img src={rl.thumbnailUrl} alt={rl.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                            <Play className="w-4 h-4 text-white/80" />
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h6 className="text-xs font-bold text-white truncate">{rl.title}</h6>
+                          <p className="text-[9px] text-zinc-500 truncate mt-0.5">{rl.videoUrl}</p>
+                          <span className="inline-block text-[9px] font-black uppercase tracking-wider bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 px-1.5 py-0.5 rounded mt-2">
+                            {rl.tag}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between border-t border-zinc-800/60 pt-3">
+                        <span className="text-[10px] text-zinc-500 font-mono">Длительность: {rl.duration}</span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => handleEditReel(rl)}
+                            className="w-7 h-7 rounded bg-zinc-950 border border-zinc-850 hover:bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-white transition-all"
+                            title="Редактировать"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteReel(rl.id)}
+                            className="w-7 h-7 rounded bg-red-950/20 border border-red-900/30 hover:bg-red-900 flex items-center justify-center text-red-400 hover:text-white transition-all"
+                            title="Удалить"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 6: Leads / Booking Form Submissions organizer */}
+            {activeTab === 'leads' && (
+              <div className="space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h4 className="text-sm font-black text-white uppercase tracking-wider mb-1">Менеджер заявок и праздников</h4>
+                    <p className="text-xs text-zinc-500">Просматривайте, фильтруйте, обновляйте статус обработки и выгружайте входящие заявки в Excel.</p>
+                  </div>
+                  <button
+                    onClick={handleExportLeadsToExcel}
+                    className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-500/10 self-start sm:self-center"
+                  >
+                    <Download className="w-4 h-4" />
+                    Экспорт в Excel
+                  </button>
+                </div>
+
+                {/* Filters */}
+                <div className="bg-zinc-950 border border-zinc-850 rounded-2xl p-4 flex flex-col md:flex-row gap-4 items-center justify-between">
+                  <div className="w-full md:w-72">
+                    <input
+                      type="text"
+                      placeholder="Поиск по имени или телефону..."
+                      value={leadsSearchQuery}
+                      onChange={(e) => setLeadsSearchQuery(e.target.value)}
+                      className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3.5 py-2 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto shrink-0 select-none pb-2 md:pb-0">
+                    {(['all', 'new', 'processing', 'completed', 'canceled'] as const).map((status) => (
+                      <button
+                        key={status}
+                        onClick={() => setLeadsStatusFilter(status)}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all border ${
+                          leadsStatusFilter === status
+                            ? 'bg-cyan-500 text-black border-cyan-500'
+                            : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
+                        }`}
+                      >
+                        {status === 'all' ? 'Все' : 
+                         status === 'new' ? 'Новые' : 
+                         status === 'processing' ? 'В обработке' : 
+                         status === 'completed' ? 'Завершены' : 'Отменены'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Leads list table or grid */}
+                {isLoadingLeads ? (
+                  <div className="py-12 text-center text-zinc-500 flex items-center justify-center gap-2">
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                    Загрузка актуальных заявок...
+                  </div>
+                ) : localLeads.length === 0 ? (
+                  <div className="py-12 text-center text-zinc-500 bg-zinc-900/40 border border-zinc-800 rounded-2xl">
+                    <Calendar className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                    Нет заявок, подходящих под критерии поиска.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {localLeads
+                      .filter(l => {
+                        const q = leadsSearchQuery.toLowerCase();
+                        const matchesSearch = l.name.toLowerCase().includes(q) || l.phone.includes(q);
+                        const matchesFilter = leadsStatusFilter === 'all' || l.status === leadsStatusFilter;
+                        return matchesSearch && matchesFilter;
+                      })
+                      .map((l) => (
+                        <div 
+                          key={l.id} 
+                          className={`bg-zinc-900/60 border rounded-2xl p-5 transition-all ${
+                            l.status === 'new' ? 'border-cyan-500/30 bg-cyan-500/[0.02]' : 'border-zinc-800'
+                          }`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800/50 mb-4">
+                            <div className="flex items-center gap-2">
+                              {l.status === 'new' && (
+                                <span className="w-2.5 h-2.5 bg-cyan-400 rounded-full animate-ping mr-1" />
+                              )}
+                              <h5 className="text-sm font-black text-white">{l.name}</h5>
+                              <span className="text-[10px] text-zinc-500 font-mono">
+                                от {new Date(l.createdAt).toLocaleDateString('ru-RU')} в {new Date(l.createdAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+
+                            {/* Status controls */}
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={l.status}
+                                onChange={(e) => handleUpdateLeadStatus(l.id, e.target.value as any)}
+                                className={`text-[10px] font-black uppercase tracking-wider rounded-lg px-2.5 py-1.5 border bg-zinc-950 focus:outline-none cursor-pointer ${
+                                  l.status === 'new' ? 'text-cyan-400 border-cyan-500/30' :
+                                  l.status === 'processing' ? 'text-amber-400 border-amber-500/30' :
+                                  l.status === 'completed' ? 'text-emerald-400 border-emerald-500/30' :
+                                  'text-zinc-500 border-zinc-800'
+                                }`}
+                              >
+                                <option value="new">Новая</option>
+                                <option value="processing">В обработке</option>
+                                <option value="completed">Завершена</option>
+                                <option value="canceled">Отменена</option>
+                              </select>
+
+                              <button
+                                onClick={() => handleDeleteLead(l.id)}
+                                className="w-8 h-8 rounded-lg bg-red-950/20 border border-red-900/30 flex items-center justify-center text-red-400 hover:text-white transition-all hover:bg-red-900"
+                                title="Удалить заявку"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                            <div>
+                              <span className="block text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-1">Номер телефона</span>
+                              <a href={`tel:${l.phone}`} className="text-xs font-bold text-white hover:text-cyan-400 transition-colors flex items-center gap-1.5 font-mono">
+                                <Phone className="w-3.5 h-3.5 text-zinc-500" />
+                                {l.phone}
+                              </a>
+                            </div>
+
+                            <div>
+                              <span className="block text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-1">Выбранная Дата</span>
+                              <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                                <Calendar className="w-3.5 h-3.5 text-zinc-500" />
+                                {new Date(l.date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}
+                              </div>
+                            </div>
+
+                            <div>
+                              <span className="block text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-1">Кол-во игроков</span>
+                              <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                                <Users className="w-3.5 h-3.5 text-zinc-500" />
+                                {l.guests} человек
+                              </div>
+                            </div>
+
+                            <div>
+                              <span className="block text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-1">Пакет / Бюджет</span>
+                              <div className="text-xs font-bold text-cyan-400">
+                                {l.packageName ? `${l.packageName} (${l.packagePrice} ₽)` : 'Общий расчет'}
+                              </div>
+                            </div>
+                          </div>
+
+                          {l.comment && (
+                            <div className="mt-4 bg-zinc-950/40 border border-zinc-800/50 p-3 rounded-xl">
+                              <span className="block text-[8px] font-black text-zinc-500 uppercase tracking-wider mb-1.5">Комментарий или пожелания клиента:</span>
+                              <p className="text-[11px] text-zinc-300 italic leading-relaxed">«{l.comment}»</p>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
             )}
 
           </div>

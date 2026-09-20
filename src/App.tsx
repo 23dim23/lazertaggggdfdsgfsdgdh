@@ -24,11 +24,15 @@ import {
   getReviews, 
   getContacts, 
   saveSection, 
+  deleteSection,
   saveService, 
   deleteService, 
   saveReview, 
   deleteReview, 
-  saveContacts 
+  saveContacts,
+  getReels,
+  saveReel,
+  deleteReel
 } from './lib/db';
 
 export default function App() {
@@ -62,11 +66,13 @@ export default function App() {
         const dbServices = await getServices();
         const dbReviews = await getReviews();
         const dbContacts = await getContacts();
+        const dbReels = await getReels();
 
         setSections(dbSections);
         setServices(dbServices);
         setReviews(dbReviews);
         setContacts(dbContacts);
+        setReels(dbReels);
       } catch (err) {
         console.error("Failed to fetch custom database from Firestore. Using static fallback.", err);
       } finally {
@@ -76,8 +82,48 @@ export default function App() {
     initAndLoadData();
   }, []);
 
+  // Dynamic Yandex Metrika Initialization
+  useEffect(() => {
+    if (contacts.yandexMetrikaId) {
+      const id = contacts.yandexMetrikaId.trim();
+      if (!id || id === '99999999') return;
+
+      try {
+        const scriptId = 'yandex-metrika-script';
+        if (!document.getElementById(scriptId)) {
+          const script = document.createElement('script');
+          script.id = scriptId;
+          script.type = 'text/javascript';
+          script.innerHTML = `
+            (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+            m[i].l=1*new Date();
+            for (var j = 0; j < e.length; j++) {if (e[j].r) { return; }}
+            k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+            (window, document, "script", "https://mc.yandex.ru/metrika/tag.js", "ym");
+
+            ym(${id}, "init", {
+              clickmap:true,
+              trackLinks:true,
+              accurateTrackBounce:true,
+              webvisor:true
+            });
+          `;
+          document.head.appendChild(script);
+
+          const noscript = document.createElement('noscript');
+          noscript.innerHTML = `<div><img src="https://mc.yandex.ru/watch/${id}" style="position:absolute; left:-9999px;" alt="" /></div>`;
+          document.body.appendChild(noscript);
+
+          console.log(`Yandex Metrika dynamically initialized with ID: ${id}`);
+        }
+      } catch (err) {
+        console.error('Failed to initialize Yandex Metrika:', err);
+      }
+    }
+  }, [contacts.yandexMetrikaId]);
+
   // Handle Admin settings update
-  const handleSaveAdminSettings = async (newSettings: AdminSettings) => {
+  const handleSaveAdminSettings = async (newSettings: AdminSettings, newSections?: Section[], newReels?: Reel[]) => {
     setIsSaving(true);
     try {
       const isAdmin = localStorage.getItem('admin_session') === 'true';
@@ -87,12 +133,16 @@ export default function App() {
       setReviews(newSettings.reviews);
       setContacts(newSettings.contacts);
       
-      const updatedSections = sections.map(sec => ({
+      const updatedSections = newSections || sections.map(sec => ({
         ...sec,
         isActive: newSettings.visibleSections[sec.id] !== undefined ? newSettings.visibleSections[sec.id] : sec.isActive,
         ...(newSettings.sectionsContent[sec.id] || {})
       }));
       setSections(updatedSections);
+
+      if (newReels) {
+        setReels(newReels);
+      }
 
       // If signed in as admin, persist to Firestore!
       if (isAdmin) {
@@ -102,6 +152,17 @@ export default function App() {
         // Save sections
         for (const sec of updatedSections) {
           await saveSection(sec);
+        }
+
+        // Delete sections from Firestore that are no longer in the set
+        if (newSections) {
+          const existingSections = await getSections();
+          const newSectionIds = new Set(newSections.map(s => s.id));
+          for (const sec of existingSections) {
+            if (!newSectionIds.has(sec.id)) {
+              await deleteSection(sec.id);
+            }
+          }
         }
 
         // Save services
@@ -129,12 +190,30 @@ export default function App() {
             await deleteReview(rev.id);
           }
         }
+
+        // Save reels
+        if (newReels) {
+          for (const rl of newReels) {
+            await saveReel(rl);
+          }
+          // Delete reels from Firestore that are no longer in the set
+          const existingReels = await getReels();
+          const newReelsIds = new Set(newReels.map(r => r.id));
+          for (const rl of existingReels) {
+            if (!newReelsIds.has(rl.id)) {
+              await deleteReel(rl.id);
+            }
+          }
+        }
       } else {
         // Fallback: save to localStorage in local preview mode
         localStorage.setItem('lazertag_sections', JSON.stringify(updatedSections));
         localStorage.setItem('lazertag_services', JSON.stringify(newSettings.services));
         localStorage.setItem('lazertag_reviews', JSON.stringify(newSettings.reviews));
         localStorage.setItem('lazertag_contacts', JSON.stringify(newSettings.contacts));
+        if (newReels) {
+          localStorage.setItem('lazertag_reels', JSON.stringify(newReels));
+        }
       }
     } catch (err) {
       console.error('Error saving to Firestore:', err);
@@ -308,6 +387,7 @@ export default function App() {
           onSaveSettings={handleSaveAdminSettings}
           sections={sections}
           onSaveSections={setSections}
+          reels={reels}
           onClose={() => setIsAdminOpen(false)}
         />
       )}

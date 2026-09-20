@@ -65,6 +65,20 @@ export interface ContactInfo {
   vkUrl?: string;
   telegramUrl?: string;
   instagramUrl?: string;
+  yandexMetrikaId?: string;
+}
+
+export interface Lead {
+  id: string;
+  name: string;
+  phone: string;
+  date: string;
+  guests: string;
+  comment: string;
+  packageName?: string;
+  packagePrice?: number;
+  createdAt: string;
+  status: 'new' | 'processing' | 'completed' | 'canceled';
 }
 
 export interface AdminSettings {
