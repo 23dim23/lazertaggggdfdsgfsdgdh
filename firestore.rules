@@ -90,7 +90,7 @@ service cloud.firestore {
 
     // 6. Leads Collection Rules
     match /leads/{leadId} {
-      allow read: if isAdmin() && isValidId(leadId);
+      allow read: if isAdmin();
       allow create: if isValidId(leadId) && isValidLead(incoming());
       allow update, delete: if isAdmin() && isValidId(leadId);
     }

@@ -77,14 +77,12 @@ export default function Footer({ contacts, onOpenAdmin }: FooterProps) {
           <span 
             onDoubleClick={onOpenAdmin} 
             className="cursor-default select-none hover:text-zinc-500 transition-colors"
-            title="Панель администратора (двойной клик)"
           >
             © {new Date().getFullYear()} ЛАЗЕРТАГ КВЕСТ. ВСЕ ПРАВА ЗАЩИЩЕНЫ.
           </span>
           <span 
             onDoubleClick={onOpenAdmin}
             className="text-[9px] bg-zinc-900 border border-zinc-850 px-2.5 py-1 rounded text-zinc-500 hover:text-cyan-400 cursor-pointer select-none"
-            title="Панель администратора (двойной клик)"
           >
             Сочи, Россия 🇷🇺
           </span>

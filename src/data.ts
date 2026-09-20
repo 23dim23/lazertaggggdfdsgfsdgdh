@@ -361,5 +361,6 @@ export const DEFAULT_CONTACTS: ContactInfo = {
   workingHours: 'Ежедневно с 10:00 до 20:00',
   yandexMapWidgetUrl: 'https://yandex.ru/map-widget/v1/?ll=39.9547%2C43.4542&z=11&l=map',
   vkUrl: 'https://vk.com/laserkvest',
-  telegramUrl: 'https://t.me/laserkvest_sochi'
+  telegramUrl: 'https://t.me/laserkvest_sochi',
+  promoBadge: 'СКИДКА -15% НА ДЕНЬ РОЖДЕНИЯ В БУДНИ!'
 };

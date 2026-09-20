@@ -66,6 +66,7 @@ export interface ContactInfo {
   telegramUrl?: string;
   instagramUrl?: string;
   yandexMetrikaId?: string;
+  promoBadge?: string;
 }
 
 export interface Lead {

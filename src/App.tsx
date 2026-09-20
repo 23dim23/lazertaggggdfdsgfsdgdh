@@ -341,6 +341,7 @@ export default function App() {
             onOpenAtmosphere={scrollToAtmosphere}
             heroTitle={currentSection.heroTitle}
             heroSubtitle={currentSection.heroSubtitle}
+            promoBadge={contacts.promoBadge}
           />
 
           {/* Atmospheric Reels Videos block (Resolves vertical clip requirement) */}

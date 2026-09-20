@@ -36,6 +36,8 @@ export default function AdminPanel({
     }
   }, []);
 
+  const [activeTab, setActiveTab] = useState<'sections' | 'services' | 'reviews' | 'contacts' | 'leads' | 'reels'>('sections');
+
   // Fetch leads dynamically when active tab is 'leads'
   useEffect(() => {
     if (isAuthenticated && activeTab === 'leads') {
@@ -52,8 +54,6 @@ export default function AdminPanel({
         });
     }
   }, [isAuthenticated, activeTab]);
-
-  const [activeTab, setActiveTab] = useState<'sections' | 'services' | 'reviews' | 'contacts' | 'leads' | 'reels'>('sections');
 
   // Excel mapping and import states
   const [excelFile, setExcelFile] = useState<File | null>(null);
@@ -1404,6 +1404,20 @@ export default function AdminPanel({
                     />
                     <p className="text-[9px] text-zinc-500 mt-1">
                       Оставьте пустым или введите числовой идентификатор вашего счетчика
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Текст промо-бейджа (на главном баннере)</label>
+                    <input
+                      type="text"
+                      placeholder="Например: СКИДКА -15% НА ДЕНЬ РОЖДЕНИЯ В БУДНИ!"
+                      value={localContacts.promoBadge || ''}
+                      onChange={(e) => setLocalContacts(prev => ({ ...prev, promoBadge: e.target.value }))}
+                      className="w-full bg-zinc-950 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                    />
+                    <p className="text-[9px] text-zinc-500 mt-1">
+                      Яркая плашка в самом верху сайта. Оставьте пустым, чтобы скрыть бейдж.
                     </p>
                   </div>
                 </div>

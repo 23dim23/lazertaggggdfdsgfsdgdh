@@ -7,6 +7,7 @@ interface HeroProps {
   onOpenAtmosphere: () => void;
   heroTitle: string;
   heroSubtitle: string;
+  promoBadge?: string;
 }
 
 export default function Hero({ 
@@ -14,7 +15,8 @@ export default function Hero({
   onOpenBooking, 
   onOpenAtmosphere,
   heroTitle,
-  heroSubtitle 
+  heroSubtitle,
+  promoBadge
 }: HeroProps) {
   return (
     <div className="relative min-h-[85vh] flex items-center justify-center bg-zinc-950 overflow-hidden py-16 sm:py-24">
@@ -30,10 +32,12 @@ export default function Hero({
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center z-10 flex flex-col items-center">
         
         {/* Animated dynamic badge */}
-        <div className="inline-flex items-center gap-1.5 bg-zinc-900 border border-cyan-500/25 px-4 py-2 rounded-full text-xs font-black uppercase tracking-widest text-cyan-400 mb-8 animate-bounce shadow-lg shadow-cyan-950/20">
-          <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-          СКИДКА -15% НА ДЕНЬ РОЖДЕНИЯ В БУДНИ!
-        </div>
+        {promoBadge && (
+          <div className="inline-flex items-center gap-1.5 bg-zinc-900 border border-cyan-500/25 px-4 py-2 rounded-full text-xs font-black uppercase tracking-widest text-cyan-400 mb-8 animate-bounce shadow-lg shadow-cyan-950/20">
+            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+            {promoBadge}
+          </div>
+        )}
 
         {/* Hero title with laser-cyber feel */}
         <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black text-white tracking-tight leading-tight max-w-5xl">
