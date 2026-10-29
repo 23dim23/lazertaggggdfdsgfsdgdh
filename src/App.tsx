@@ -34,6 +34,7 @@ import {
   saveReel,
   deleteReel
 } from './lib/db';
+import { resolveServiceImage, resolveReelThumbnail, useTransparentLogo } from './lib/media';
 
 export default function App() {
   // Navigation State
@@ -56,25 +57,41 @@ export default function App() {
   const [selectedBookingPackage, setSelectedBookingPackage] = useState<string | undefined>(undefined);
   const [selectedBookingPrice, setSelectedBookingPrice] = useState<number | undefined>(undefined);
 
+  const logoSrc = useTransparentLogo();
+
   // Load Firestore data on initial mount
   useEffect(() => {
     async function initAndLoadData() {
       setIsLoading(true);
       try {
         await testFirestoreConnection();
-        const dbSections = await getSections();
-        const dbServices = await getServices();
-        const dbReviews = await getReviews();
-        const dbContacts = await getContacts();
-        const dbReels = await getReels();
+        const [dbSections, dbServices, dbReviews, dbContacts, dbReels] = await Promise.all([
+          getSections(),
+          getServices(),
+          getReviews(),
+          getContacts(),
+          getReels(),
+        ]);
+
+        // Ensure every service loaded from DB has a valid resolved image
+        const hydratedServices = dbServices.map((srv, idx) => ({
+          ...srv,
+          image: resolveServiceImage(srv, idx),
+        }));
+
+        // Ensure every reel loaded from DB has a valid resolved thumbnail
+        const hydratedReels = dbReels.map((rl, idx) => ({
+          ...rl,
+          thumbnailUrl: resolveReelThumbnail(rl, idx),
+        }));
 
         setSections(dbSections);
-        setServices(dbServices);
+        setServices(hydratedServices);
         setReviews(dbReviews);
         setContacts(dbContacts);
-        setReels(dbReels);
+        setReels(hydratedReels);
       } catch (err) {
-        console.error("Failed to fetch custom database from Firestore. Using static fallback.", err);
+        console.warn("Using local fallback database.", err);
       } finally {
         setIsLoading(false);
       }
@@ -113,11 +130,9 @@ export default function App() {
           const noscript = document.createElement('noscript');
           noscript.innerHTML = `<div><img src="https://mc.yandex.ru/watch/${id}" style="position:absolute; left:-9999px;" alt="" /></div>`;
           document.body.appendChild(noscript);
-
-          console.log(`Yandex Metrika dynamically initialized with ID: ${id}`);
         }
       } catch (err) {
-        console.error('Failed to initialize Yandex Metrika:', err);
+        console.warn('Failed to initialize Yandex Metrika:', err);
       }
     }
   }, [contacts.yandexMetrikaId]);
@@ -126,10 +141,13 @@ export default function App() {
   const handleSaveAdminSettings = async (newSettings: AdminSettings, newSections?: Section[], newReels?: Reel[]) => {
     setIsSaving(true);
     try {
-      const isAdmin = localStorage.getItem('admin_session') === 'true';
+      const hydratedServices = newSettings.services.map((srv, idx) => ({
+        ...srv,
+        image: resolveServiceImage(srv, idx),
+      }));
 
       // Update state locally first so UI is snappy
-      setServices(newSettings.services);
+      setServices(hydratedServices);
       setReviews(newSettings.reviews);
       setContacts(newSettings.contacts);
       
@@ -140,21 +158,26 @@ export default function App() {
       }));
       setSections(updatedSections);
 
+      let hydratedReels = reels;
       if (newReels) {
-        setReels(newReels);
+        hydratedReels = newReels.map((rl, idx) => ({
+          ...rl,
+          thumbnailUrl: resolveReelThumbnail(rl, idx),
+        }));
+        setReels(hydratedReels);
       }
 
-      // If signed in as admin, persist to Firestore!
-      if (isAdmin) {
-        // Save contacts
+      // Persist each collection independently so an error in one never blocks the others
+      try {
         await saveContacts(newSettings.contacts);
+      } catch (e) {
+        console.warn('Error saving contacts:', e);
+      }
 
-        // Save sections
+      try {
         for (const sec of updatedSections) {
           await saveSection(sec);
         }
-
-        // Delete sections from Firestore that are no longer in the set
         if (newSections) {
           const existingSections = await getSections();
           const newSectionIds = new Set(newSections.map(s => s.id));
@@ -164,25 +187,29 @@ export default function App() {
             }
           }
         }
+      } catch (e) {
+        console.warn('Error saving sections:', e);
+      }
 
-        // Save services
-        for (const srv of newSettings.services) {
+      try {
+        for (const srv of hydratedServices) {
           await saveService(srv);
         }
-        // Delete services from Firestore that are no longer in the set
         const existingServices = await getServices();
-        const newServiceIds = new Set(newSettings.services.map(s => s.id));
+        const newServiceIds = new Set(hydratedServices.map(s => s.id));
         for (const srv of existingServices) {
           if (!newServiceIds.has(srv.id)) {
             await deleteService(srv.id);
           }
         }
+      } catch (e) {
+        console.warn('Error saving services:', e);
+      }
 
-        // Save reviews
+      try {
         for (const rev of newSettings.reviews) {
           await saveReview(rev);
         }
-        // Delete reviews from Firestore that are no longer in the set
         const existingReviews = await getReviews();
         const newReviewIds = new Set(newSettings.reviews.map(r => r.id));
         for (const rev of existingReviews) {
@@ -190,34 +217,37 @@ export default function App() {
             await deleteReview(rev.id);
           }
         }
+      } catch (e) {
+        console.warn('Error saving reviews:', e);
+      }
 
-        // Save reels
-        if (newReels) {
-          for (const rl of newReels) {
+      if (newReels) {
+        try {
+          for (const rl of hydratedReels) {
             await saveReel(rl);
           }
-          // Delete reels from Firestore that are no longer in the set
           const existingReels = await getReels();
-          const newReelsIds = new Set(newReels.map(r => r.id));
+          const newReelsIds = new Set(hydratedReels.map(r => r.id));
           for (const rl of existingReels) {
             if (!newReelsIds.has(rl.id)) {
               await deleteReel(rl.id);
             }
           }
-        }
-      } else {
-        // Fallback: save to localStorage in local preview mode
-        localStorage.setItem('lazertag_sections', JSON.stringify(updatedSections));
-        localStorage.setItem('lazertag_services', JSON.stringify(newSettings.services));
-        localStorage.setItem('lazertag_reviews', JSON.stringify(newSettings.reviews));
-        localStorage.setItem('lazertag_contacts', JSON.stringify(newSettings.contacts));
-        if (newReels) {
-          localStorage.setItem('lazertag_reels', JSON.stringify(newReels));
+        } catch (e) {
+          console.warn('Error saving reels:', e);
         }
       }
+
+      // Also keep localStorage synced as backup
+      localStorage.setItem('lazertag_sections', JSON.stringify(updatedSections));
+      localStorage.setItem('lazertag_services', JSON.stringify(hydratedServices));
+      localStorage.setItem('lazertag_reviews', JSON.stringify(newSettings.reviews));
+      localStorage.setItem('lazertag_contacts', JSON.stringify(newSettings.contacts));
+      if (newReels) {
+        localStorage.setItem('lazertag_reels', JSON.stringify(hydratedReels));
+      }
     } catch (err) {
-      console.error('Error saving to Firestore:', err);
-      alert('Ошибка при сохранении в базу данных. Пожалуйста, убедитесь, что вы вошли в систему как администратор.');
+      console.warn('Error saving to Firestore:', err);
     } finally {
       setIsSaving(false);
     }
@@ -229,8 +259,7 @@ export default function App() {
       setReviews(prev => [newReview, ...prev]);
       await saveReview(newReview);
     } catch (err) {
-      console.error('Error saving review to Firestore:', err);
-      // Local fallback on exception
+      console.warn('Error saving review to Firestore:', err);
       const saved = localStorage.getItem('lazertag_reviews');
       const localRev = saved ? JSON.parse(saved) : INITIAL_REVIEWS;
       localStorage.setItem('lazertag_reviews', JSON.stringify([newReview, ...localRev]));
@@ -295,24 +324,22 @@ export default function App() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center relative overflow-hidden">
-        {/* Cyberpunk grid bg */}
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#18181b_1px,transparent_1px),linear-gradient(to_bottom,#18181b_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)] opacity-30" />
+        {/* Tactical grid bg */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#18181b_1px,transparent_1px),linear-gradient(to_bottom,#18181b_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)] opacity-35" />
         
         <div className="relative z-10 flex flex-col items-center">
           {/* Animated loading ring */}
-          <div className="relative w-16 h-16">
-            <div className="absolute inset-0 border-4 border-cyan-500/20 rounded-full" />
-            <div className="absolute inset-0 border-4 border-t-cyan-500 border-r-cyan-500 rounded-full animate-spin" />
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-zinc-900 border border-cyan-500/30 rounded-full flex items-center justify-center">
-              <span className="text-[9px] font-black text-cyan-400">LT</span>
-            </div>
+          <div className="relative w-24 h-24 flex items-center justify-center">
+            <div className="absolute inset-0 border-4 border-orange-500/20 rounded-full" />
+            <div className="absolute inset-0 border-4 border-t-orange-500 border-r-orange-500 rounded-full animate-spin" />
+            <img src={logoSrc} alt="Лазер Квест" className="w-16 h-16 object-contain drop-shadow" />
           </div>
           
-          <h2 className="text-sm font-black text-white uppercase tracking-widest mt-6 animate-pulse">
-            Загрузка Арены...
+          <h2 className="text-sm font-black text-white uppercase tracking-widest mt-6">
+            ЛАЗЕР <span className="text-orange-500">КВЕСТ</span>
           </h2>
           <p className="text-[10px] text-zinc-500 uppercase tracking-wider mt-1.5 font-bold">
-            Синхронизация с Firestore DB
+            Загрузка тактических полигонов...
           </p>
         </div>
       </div>
@@ -320,9 +347,9 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white selection:bg-cyan-500 selection:text-black">
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-orange-500 selection:text-black">
       
-      {/* Interactive Global Laser tag Header */}
+      {/* Interactive Global Laser Quest Header */}
       <Navbar 
         sections={sections}
         activeSectionId={activeSectionId}
@@ -344,7 +371,7 @@ export default function App() {
             promoBadge={contacts.promoBadge}
           />
 
-          {/* Atmospheric Reels Videos block (Resolves vertical clip requirement) */}
+          {/* Atmospheric Reels / VK Clips block */}
           <ReelsWidget reels={reels} />
 
           {/* Interactive Services / Products Catalogue */}
@@ -389,6 +416,8 @@ export default function App() {
           sections={sections}
           onSaveSections={setSections}
           reels={reels}
+          onSaveReels={setReels}
+          onSaveServicesLive={setServices}
           onClose={() => setIsAdminOpen(false)}
         />
       )}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Calendar, Users, Phone, User, Check, Sparkles, MessageSquare } from 'lucide-react';
+import { X, Calendar, Users, Phone, User, Check, Flame, MessageSquare } from 'lucide-react';
 import { saveLead } from '../lib/db';
 import { Lead } from '../types';
 
@@ -44,7 +44,6 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
       setIsSubmitted(true);
     } catch (err) {
       console.error('Error saving lead to DB:', err);
-      // Fallback so customer conversion is never blocked even if connection fails
       setLoading(false);
       setIsSubmitted(true);
     }
@@ -61,14 +60,14 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
       <div className="relative w-full max-w-lg bg-zinc-950 border border-zinc-800 rounded-2xl overflow-hidden shadow-2xl">
-        {/* Dynamic neon header border */}
-        <div className="h-1.5 w-full bg-gradient-to-r from-cyan-500 via-purple-500 to-emerald-500" />
+        {/* Tactical orange header bar */}
+        <div className="h-1.5 w-full bg-gradient-to-r from-orange-600 via-orange-500 to-amber-500" />
 
         <button 
           onClick={onClose}
-          className="absolute top-4 right-4 text-zinc-400 hover:text-white transition-colors"
+          className="absolute top-4 right-4 text-zinc-400 hover:text-white transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -76,20 +75,20 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
         {!isSubmitted ? (
           <form onSubmit={handleSubmit} className="p-6 sm:p-8">
             <div className="mb-6">
-              <span className="text-xs font-black uppercase tracking-wider text-cyan-400 px-2 py-1 bg-cyan-950/50 border border-cyan-800/30 rounded">
-                Бронирование
+              <span className="text-xs font-black uppercase tracking-wider text-orange-400 px-2.5 py-1 bg-orange-950/50 border border-orange-500/30 rounded-lg">
+                Бронирование игры
               </span>
               <h3 className="text-2xl font-black text-white mt-3">
-                {packageName ? `Заказать программу «${packageName}»` : 'Забронировать космическую игру'}
+                {packageName ? `Заказать «${packageName}»` : 'Забронировать лазертаг-квест'}
               </h3>
               <p className="text-sm text-zinc-400 mt-1">
                 Оставьте ваши контакты, и наш координатор праздников свяжется с вами в течение 10 минут!
               </p>
 
               {packagePrice && (
-                <div className="mt-4 p-3 bg-zinc-900 border border-zinc-800 rounded-lg flex justify-between items-center">
+                <div className="mt-4 p-3 bg-zinc-900 border border-zinc-800 rounded-xl flex justify-between items-center">
                   <span className="text-sm text-zinc-400">Стоимость программы:</span>
-                  <span className="text-lg font-black text-emerald-400">{packagePrice.toLocaleString()} ₽</span>
+                  <span className="text-lg font-black text-orange-400 tabular-nums">{packagePrice.toLocaleString('ru-RU')} ₽</span>
                 </div>
               )}
             </div>
@@ -108,7 +107,7 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Александр"
-                    className="w-full bg-zinc-900 text-white text-sm border border-zinc-800 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                    className="w-full bg-zinc-900 text-white text-sm border border-zinc-800 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:ring-1 focus:ring-orange-500"
                   />
                 </div>
               </div>
@@ -126,7 +125,7 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     placeholder="+7 (999) 123-45-67"
-                    className="w-full bg-zinc-900 text-white text-sm border border-zinc-800 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                    className="w-full bg-zinc-900 text-white text-sm border border-zinc-800 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:ring-1 focus:ring-orange-500"
                   />
                 </div>
               </div>
@@ -143,7 +142,7 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
                       type="date"
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
-                      className="w-full bg-zinc-900 text-white text-sm border border-zinc-800 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                      className="w-full bg-zinc-900 text-white text-sm border border-zinc-800 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:ring-1 focus:ring-orange-500"
                     />
                   </div>
                 </div>
@@ -160,7 +159,7 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
                       value={guests}
                       min="1"
                       onChange={(e) => setGuests(e.target.value)}
-                      className="w-full bg-zinc-900 text-white text-sm border border-zinc-800 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                      className="w-full bg-zinc-900 text-white text-sm border border-zinc-800 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:ring-1 focus:ring-orange-500"
                     />
                   </div>
                 </div>
@@ -178,7 +177,7 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
                     onChange={(e) => setComment(e.target.value)}
                     placeholder="Укажите возраст детей, сюжет квеста или другие пожелания..."
                     rows={2}
-                    className="w-full bg-zinc-900 text-white text-sm border border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-cyan-500 resize-none"
+                    className="w-full bg-zinc-900 text-white text-sm border border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-orange-500 resize-none"
                   />
                 </div>
               </div>
@@ -188,20 +187,20 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-900 font-bold py-3 px-4 rounded-xl transition-all"
+                className="flex-1 border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-900 font-bold py-3 px-4 rounded-xl transition-all cursor-pointer"
               >
                 Отмена
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="flex-1 bg-gradient-to-r from-cyan-500 to-emerald-500 text-black font-extrabold py-3 px-4 rounded-xl transition-all hover:brightness-110 shadow-lg shadow-cyan-950/50 flex items-center justify-center gap-2"
+                className="flex-1 bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-amber-500 text-white font-extrabold py-3 px-4 rounded-xl transition-all shadow-lg shadow-orange-950/50 flex items-center justify-center gap-2 cursor-pointer"
               >
                 {loading ? (
-                  <span className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                  <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 ) : (
                   <>
-                    <Sparkles className="w-4 h-4" />
+                    <Flame className="w-4 h-4" />
                     Забронировать
                   </>
                 )}
@@ -210,16 +209,16 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
           </form>
         ) : (
           <div className="p-8 text-center flex flex-col items-center">
-            <div className="w-16 h-16 bg-emerald-500/20 border border-emerald-400 text-emerald-400 rounded-full flex items-center justify-center mb-6">
+            <div className="w-16 h-16 bg-orange-500/20 border border-orange-500 text-orange-400 rounded-full flex items-center justify-center mb-6">
               <Check className="w-8 h-8" />
             </div>
             <h3 className="text-2xl font-black text-white">Заявка принята!</h3>
             <p className="text-zinc-400 text-sm mt-2 max-w-sm">
-              Благодарим за обращение. Координатор праздников свяжется с вами по номеру <span className="text-cyan-400 font-bold">{phone}</span> в течение ближайших 10 минут для подтверждения бронирования.
+              Благодарим за обращение. Координатор праздников свяжется с вами по номеру <span className="text-orange-400 font-bold">{phone}</span> в течение ближайших 10 минут для подтверждения бронирования.
             </p>
             <button
               onClick={handleReset}
-              className="mt-8 bg-zinc-900 border border-zinc-800 text-white hover:bg-zinc-800 font-bold py-2.5 px-6 rounded-xl transition-colors"
+              className="mt-8 bg-zinc-900 border border-zinc-800 text-white hover:bg-zinc-800 font-bold py-2.5 px-6 rounded-xl transition-colors cursor-pointer"
             >
               Закрыть
             </button>

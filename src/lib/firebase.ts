@@ -1,11 +1,30 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, signInAnonymously } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, setLogLevel, Firestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
+
+// Silence internal @firebase/firestore WebChannel 10s timeout console errors when client/network is offline
+try {
+  setLogLevel('silent');
+} catch {
+  // Ignore if unsupported
+}
 
 const app = initializeApp(firebaseConfig);
 
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
+function createFirestoreInstance(): Firestore {
+  try {
+    return initializeFirestore(
+      app,
+      { experimentalAutoDetectLongPolling: true },
+      firebaseConfig.firestoreDatabaseId
+    );
+  } catch {
+    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  }
+}
+
+export const db = createFirestoreInstance(); /* CRITICAL: The app will break without this line */
 export const auth = getAuth();
 export const googleProvider = new GoogleAuthProvider();
 
@@ -35,7 +54,26 @@ export interface FirestoreErrorInfo {
   };
 }
 
+export function isOfflineOrTimeoutError(error: unknown): boolean {
+  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  const code = (error as { code?: string })?.code?.toLowerCase() || '';
+  return (
+    msg.includes('client is offline') ||
+    msg.includes('could not reach cloud firestore backend') ||
+    msg.includes('firestore timeout') ||
+    msg.includes('failed to get document') ||
+    msg.includes('network error') ||
+    code === 'unavailable' ||
+    code === 'deadline-exceeded'
+  );
+}
+
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  if (isOfflineOrTimeoutError(error)) {
+    // Gracefully allow local fallback when Firestore backend is unreachable/offline
+    return;
+  }
+
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {

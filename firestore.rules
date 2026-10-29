@@ -30,13 +30,9 @@ service cloud.firestore {
 
     function isValidReel(data) {
       return data.id is string && data.id.size() <= 128 &&
-             data.title is string && data.title.size() <= 300 &&
-             data.videoUrl is string && data.videoUrl.size() <= 1000 &&
-             data.thumbnailUrl is string && data.thumbnailUrl.size() <= 1000 &&
-             data.likes is int && data.likes >= 0 &&
-             data.plays is string && data.plays.size() <= 100 &&
-             data.duration is string && data.duration.size() <= 30 &&
-             data.tag is string && data.tag.size() <= 100;
+             data.title is string && data.title.size() <= 500 &&
+             data.videoUrl is string && data.videoUrl.size() <= 5000 &&
+             data.thumbnailUrl is string && data.thumbnailUrl.size() <= 900000;
     }
 
     function isValidLead(data) {
