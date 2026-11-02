@@ -19,12 +19,22 @@ import {
   REEL_PRESET_COVERS, 
   resolveServiceImage, 
   getFallbackServiceImage,
+  getProxiedImageUrl,
   resolveReelThumbnail, 
   getFallbackReelCover,
   parseVideoSource, 
+  extractVideoThumbnail,
+  isGeneratedPresetCover,
   compressImageFile,
   useTransparentLogo
 } from '../lib/media';
+import {
+  parseExcelFileWithImages,
+  buildServicesPreviewFromSheet,
+  finalizeImportedServices,
+  ParsedExcelWorkbookResult,
+  ParsedExcelRowPreview
+} from '../lib/excelImport';
 
 interface AdminPanelProps {
   settings: AdminSettings;
@@ -89,17 +99,20 @@ export default function AdminPanel({
 
   // Excel mapping and import states
   const [excelFile, setExcelFile] = useState<File | null>(null);
-  const [excelData, setExcelData] = useState<any[][] | null>(null);
-  const [excelHeaders, setExcelHeaders] = useState<string[]>([]);
+  const [excelWorkbook, setExcelWorkbook] = useState<ParsedExcelWorkbookResult | null>(null);
+  const [selectedSheetIdx, setSelectedSheetIdx] = useState<number>(0);
+  const [importAllSheets, setImportAllSheets] = useState<boolean>(true);
+  const [isParsingExcel, setIsParsingExcel] = useState<boolean>(false);
   const [columnMapping, setColumnMapping] = useState({
     category: '',
     name: '',
     description: '',
     price: '',
     oldPrice: '',
+    duration: '',
     image: '',
   });
-  const [importStatus, setImportStatus] = useState<'idle' | 'previewing' | 'success' | 'error'>('idle');
+  const [importStatus, setImportStatus] = useState<'idle' | 'previewing' | 'importing' | 'success' | 'error'>('idle');
 
   // Local editable copies
   const [localServices, setLocalServices] = useState<Service[]>(() =>
@@ -142,9 +155,43 @@ export default function AdminPanel({
     title: '', videoUrl: '', thumbnailUrl: '', likes: 120, plays: '1.5K', duration: '0:15', tag: 'Общее'
   });
   const [isUploadingReelThumb, setIsUploadingReelThumb] = useState(false);
+  const [isExtractingVideoFrame, setIsExtractingVideoFrame] = useState(false);
 
   const [leadsSearchQuery, setLeadsSearchQuery] = useState('');
   const [leadsStatusFilter, setLeadsStatusFilter] = useState<'all' | 'new' | 'processing' | 'completed' | 'canceled'>('all');
+
+  // Automatically pull first-frame preview whenever user pastes/changes videoUrl in Reel form
+  useEffect(() => {
+    const rawUrl = reelForm.videoUrl?.trim();
+    if (!rawUrl || rawUrl.length < 8) return;
+
+    // Only auto-replace if current thumbnailUrl is empty or is a generated SVG preset
+    if (!isGeneratedPresetCover(reelForm.thumbnailUrl)) return;
+
+    let cancelled = false;
+    setIsExtractingVideoFrame(true);
+
+    const timer = setTimeout(() => {
+      extractVideoThumbnail(rawUrl)
+        .then((frameUrl) => {
+          if (cancelled) return;
+          if (frameUrl) {
+            setReelForm((prev) => {
+              if (!isGeneratedPresetCover(prev.thumbnailUrl)) return prev;
+              return { ...prev, thumbnailUrl: frameUrl };
+            });
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setIsExtractingVideoFrame(false);
+        });
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [reelForm.videoUrl]);
 
   // Handle Admin login
   const handleLogin = (e: React.FormEvent) => {
@@ -278,7 +325,63 @@ export default function AdminPanel({
     }
   };
 
-  // Reels / VK Clips helper handlers (with immediate Firestore persistence!)
+  // Force extract first-frame preview for current reelForm.videoUrl
+  const handleForceExtractCurrentReelFrame = async () => {
+    if (!reelForm.videoUrl?.trim()) {
+      showToast('Сначала вставьте ссылку на видео или клип!');
+      return;
+    }
+    setIsExtractingVideoFrame(true);
+    try {
+      const extracted = await extractVideoThumbnail(reelForm.videoUrl);
+      if (extracted) {
+        setReelForm(prev => ({ ...prev, thumbnailUrl: extracted }));
+        showToast('Превью из первых кадров видео успешно подтянулось!');
+      } else {
+        showToast('Прямой кадр недоступен — установлена фирменная обложка.');
+      }
+    } finally {
+      setIsExtractingVideoFrame(false);
+    }
+  };
+
+  // Batch extract video frames for all existing clips
+  const handleRefreshAllReelVideoFrames = async () => {
+    setIsExtractingVideoFrame(true);
+    showToast('Извлекаем превью из видео для всех клипов...');
+    try {
+      let updatedCount = 0;
+      const updatedList: Reel[] = [];
+      for (let i = 0; i < localReels.length; i++) {
+        const rl = localReels[i];
+        const extracted = await extractVideoThumbnail(rl.videoUrl);
+        if (extracted) {
+          updatedCount++;
+          const nextRl = { ...rl, thumbnailUrl: extracted };
+          updatedList.push(nextRl);
+          await dbSaveReel(nextRl).catch(() => {});
+        } else {
+          updatedList.push(rl);
+        }
+      }
+      setLocalReels(updatedList);
+      if (onSaveReels) onSaveReels(updatedList);
+      try {
+        localStorage.setItem('lazertag_reels', JSON.stringify(updatedList));
+      } catch {
+        // Ignore quota error
+      }
+      showToast(
+        updatedCount > 0
+          ? `Обновлены видео-превью для ${updatedCount} клипов!`
+          : 'Превью клипов проверены и актуальны!'
+      );
+    } finally {
+      setIsExtractingVideoFrame(false);
+    }
+  };
+
+  // Reels / VK Clips helper handlers (with auto-frame extraction & immediate Firestore persistence!)
   const handleSaveReelForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reelForm.title || !reelForm.videoUrl) {
@@ -286,7 +389,17 @@ export default function AdminPanel({
       return;
     }
 
-    const resolvedThumb = resolveReelThumbnail(reelForm, localReels.length);
+    let finalThumb = reelForm.thumbnailUrl?.trim() || '';
+    if (isGeneratedPresetCover(finalThumb)) {
+      setIsExtractingVideoFrame(true);
+      const autoFrame = await extractVideoThumbnail(reelForm.videoUrl).catch(() => null);
+      setIsExtractingVideoFrame(false);
+      if (autoFrame) {
+        finalThumb = autoFrame;
+      }
+    }
+
+    const resolvedThumb = resolveReelThumbnail({ ...reelForm, thumbnailUrl: finalThumb }, localReels.length);
 
     let targetReel: Reel;
     let updatedReels: Reel[];
@@ -320,14 +433,18 @@ export default function AdminPanel({
 
     setLocalReels(updatedReels);
     if (onSaveReels) onSaveReels(updatedReels);
-    localStorage.setItem('lazertag_reels', JSON.stringify(updatedReels));
+    try {
+      localStorage.setItem('lazertag_reels', JSON.stringify(updatedReels));
+    } catch {
+      // Ignore storage quota
+    }
 
     try {
       await dbSaveReel(targetReel);
-      showToast('VK Клип успешно сохранен и опубликован на сайте!');
+      showToast('Клип с превью успешно сохранен и опубликован на сайте!');
     } catch (err) {
       console.error('Error saving reel to Firestore:', err);
-      showToast('Клип добавлен локально (ошибка облачной синхронизации).');
+      showToast('Клип добавлен локально.');
     }
 
     setReelForm({ title: '', videoUrl: '', thumbnailUrl: '', likes: 120, plays: '1.5K', duration: '0:15', tag: 'Общее' });
@@ -342,7 +459,11 @@ export default function AdminPanel({
     const updatedReels = localReels.filter(r => r.id !== id);
     setLocalReels(updatedReels);
     if (onSaveReels) onSaveReels(updatedReels);
-    localStorage.setItem('lazertag_reels', JSON.stringify(updatedReels));
+    try {
+      localStorage.setItem('lazertag_reels', JSON.stringify(updatedReels));
+    } catch {
+      // Ignore quota
+    }
     try {
       await dbDeleteReel(id);
       showToast('Видео-клип удален с сайта.');
@@ -404,126 +525,128 @@ export default function AdminPanel({
     XLSX.writeFile(wb, `leads_export_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
-  // Excel file loader using xlsx
-  const handleExcelFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Excel file loader with embedded .xlsx image & hyperlink extraction
+  const handleExcelFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setExcelFile(file);
+    setIsParsingExcel(true);
     setImportStatus('idle');
 
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
-
-        if (data && data.length > 0) {
-          setExcelData(data);
-          const headers = (data[0] || []).map(h => String(h || ''));
-          setExcelHeaders(headers);
-
-          // Propose smart mappings based on typical Yandex Map Excel export fields (including Photo!)
-          const mapping = {
-            category: headers.find(h => /категор|раздел/i.test(h)) || '',
-            name: headers.find(h => /назван|услуг|товар|имя|заголов/i.test(h)) || '',
-            description: headers.find(h => /опис|информ|коммент/i.test(h)) || '',
-            price: headers.find(h => /цен|стоим/i.test(h)) || '',
-            oldPrice: headers.find(h => /скидк|стар/i.test(h)) || '',
-            image: headers.find(h => /фото|картинк|изображ|photo|image|img|ссылк/i.test(h)) || '',
-          };
-          setColumnMapping(mapping);
-          setImportStatus('previewing');
-        } else {
-          setErrorMsg('Файл Excel пуст или поврежден.');
-          setImportStatus('error');
+    try {
+      const parsedWb = await parseExcelFileWithImages(file);
+      if (parsedWb.sheets.length > 0) {
+        setExcelWorkbook(parsedWb);
+        setSelectedSheetIdx(0);
+        setImportAllSheets(parsedWb.sheets.length > 1);
+        setColumnMapping(parsedWb.sheets[0].suggestedMapping);
+        setImportStatus('previewing');
+        if (parsedWb.embeddedImagesCount > 0) {
+          showToast(`Обнаружено встроенных фото в файле Excel: ${parsedWb.embeddedImagesCount} шт.`);
         }
-      } catch (err) {
-        setErrorMsg('Ошибка при чтении Excel файла. Убедитесь в корректности формата.');
+      } else {
+        setErrorMsg('Файл Excel пуст или не содержит табличных данных.');
         setImportStatus('error');
+        showToast('Файл Excel пуст или поврежден.');
       }
-    };
-    reader.readAsBinaryString(file);
+    } catch (err) {
+      console.error('Excel parse error:', err);
+      setErrorMsg('Ошибка при чтении Excel файла. Убедитесь в корректности формата.');
+      setImportStatus('error');
+      showToast('Ошибка при чтении Excel файла.');
+    } finally {
+      setIsParsingExcel(false);
+      e.target.value = '';
+    }
   };
 
-  // Process mapping and import parsed services (with photos and immediate Firestore save!)
-  const processExcelImport = async () => {
-    if (!excelData || excelData.length <= 1) return;
+  const handleSelectExcelSheet = (idx: number) => {
+    if (!excelWorkbook || !excelWorkbook.sheets[idx]) return;
+    setSelectedSheetIdx(idx);
+    setColumnMapping(excelWorkbook.sheets[idx].suggestedMapping);
+  };
 
-    const headers = excelHeaders;
-    const catIdx = headers.indexOf(columnMapping.category);
-    const nameIdx = headers.indexOf(columnMapping.name);
-    const descIdx = headers.indexOf(columnMapping.description);
-    const priceIdx = headers.indexOf(columnMapping.price);
-    const oldPriceIdx = headers.indexOf(columnMapping.oldPrice);
-    const imgIdx = headers.indexOf(columnMapping.image);
+  // Compute live preview rows for currently selected sheet (or all sheets)
+  const currentExcelSheet = excelWorkbook?.sheets[selectedSheetIdx] || null;
+  const excelPreviewRows: ParsedExcelRowPreview[] = React.useMemo(() => {
+    if (!excelWorkbook || excelWorkbook.sheets.length === 0) return [];
+    if (importAllSheets && excelWorkbook.sheets.length > 1) {
+      const all: ParsedExcelRowPreview[] = [];
+      excelWorkbook.sheets.forEach((sh, idx) => {
+        const mapToUse = idx === selectedSheetIdx ? columnMapping : sh.suggestedMapping;
+        all.push(
+          ...buildServicesPreviewFromSheet(
+            sh,
+            mapToUse,
+            idx === 0 ? excelWorkbook.unassignedMediaQueue : []
+          )
+        );
+      });
+      return all;
+    }
+    if (!currentExcelSheet) return [];
+    return buildServicesPreviewFromSheet(
+      currentExcelSheet,
+      columnMapping,
+      excelWorkbook.unassignedMediaQueue
+    );
+  }, [excelWorkbook, selectedSheetIdx, importAllSheets, columnMapping, currentExcelSheet]);
 
-    if (nameIdx === -1 || priceIdx === -1) {
-      showToast('Необходимо сопоставить как минимум «Название» и «Цену» услуги!');
+  // Process mapping and import parsed services (with embedded photos, cloud links, and immediate Firestore save!)
+  const processExcelImport = async (replaceExisting = false) => {
+    if (!excelPreviewRows || excelPreviewRows.length === 0) {
+      showToast('Не найдено услуг для импорта. Проверьте выбранную колонку «Название»!');
       return;
     }
 
-    const importedServices: Service[] = [];
+    setImportStatus('importing');
+    try {
+      const importedServices = await finalizeImportedServices(excelPreviewRows);
 
-    for (let i = 1; i < excelData.length; i++) {
-      const row = excelData[i];
-      if (!row || row.length === 0) continue;
+      if (importedServices.length > 0) {
+        const oldServicesToDelete = replaceExisting ? [...localServices] : [];
+        const updated = replaceExisting
+          ? importedServices
+          : [...localServices, ...importedServices];
 
-      const name = String(row[nameIdx] || '').trim();
-      const priceVal = parseFloat(String(row[priceIdx] || '').replace(/[^\d.]/g, ''));
-      
-      if (!name || isNaN(priceVal)) continue;
-
-      const category = catIdx !== -1 && row[catIdx] ? String(row[catIdx]).trim() : 'Основное';
-      const description = descIdx !== -1 && row[descIdx] ? String(row[descIdx]).trim() : 'Подробности уточняйте у организатора праздника.';
-      const oldPriceVal = oldPriceIdx !== -1 && row[oldPriceIdx] 
-        ? parseFloat(String(row[oldPriceIdx]).replace(/[^\d.]/g, '')) 
-        : undefined;
-      const rawImage = imgIdx !== -1 && row[imgIdx] ? String(row[imgIdx]).trim() : '';
-
-      const draftSrv: Partial<Service> = {
-        category,
-        name,
-        description,
-        image: rawImage,
-      };
-
-      const srvObj: Service = {
-        id: `srv-excel-${Date.now()}-${i}`,
-        category,
-        name,
-        description,
-        price: priceVal,
-        ...(oldPriceVal && !isNaN(oldPriceVal) ? { oldPrice: oldPriceVal } : {}),
-        image: resolveServiceImage(draftSrv, i),
-        availability: 'Доступно',
-        isPopular: false
-      };
-
-      importedServices.push(srvObj);
-    }
-
-    if (importedServices.length > 0) {
-      const updated = [...localServices, ...importedServices];
-      setLocalServices(updated);
-      if (onSaveServicesLive) onSaveServicesLive(updated);
-      setImportStatus('success');
-      setExcelFile(null);
-      setExcelData(null);
-
-      // Persist imported services immediately to Firestore
-      try {
-        for (const srv of importedServices) {
-          await dbSaveService(srv);
+        setLocalServices(updated);
+        if (onSaveServicesLive) onSaveServicesLive(updated);
+        try {
+          localStorage.setItem('lazertag_services', JSON.stringify(updated));
+        } catch {
+          // Ignore quota error
         }
-        showToast(`Импортировано и сохранено услуг: ${importedServices.length} шт.`);
-      } catch (e) {
-        console.error('Error saving imported services:', e);
+
+        setImportStatus('success');
+        setExcelFile(null);
+        setExcelWorkbook(null);
+
+        const withPhotoCount = importedServices.filter((s) => Boolean(s.image)).length;
+        showToast(
+          `Загружено услуг: ${importedServices.length} шт. (с фотографиями: ${withPhotoCount} шт.)!`
+        );
+
+        // Persist imported services immediately to Firestore
+        try {
+          if (replaceExisting && oldServicesToDelete.length > 0) {
+            for (const oldSrv of oldServicesToDelete) {
+              await dbDeleteService(oldSrv.id).catch(() => {});
+            }
+          }
+          for (const srv of importedServices) {
+            await dbSaveService(srv);
+          }
+        } catch (e) {
+          console.error('Error saving imported services:', e);
+        }
+      } else {
+        setImportStatus('previewing');
+        showToast('Не удалось импортировать услуги. Проверьте колонки.');
       }
-    } else {
-      showToast('Не удалось импортировать услуги. Проверьте колонки.');
+    } catch (err) {
+      console.error('Import error:', err);
+      setImportStatus('previewing');
+      showToast('Ошибка при импорте услуг.');
     }
   };
 
@@ -570,7 +693,11 @@ export default function AdminPanel({
 
     setLocalServices(updatedList);
     if (onSaveServicesLive) onSaveServicesLive(updatedList);
-    localStorage.setItem('lazertag_services', JSON.stringify(updatedList));
+    try {
+      localStorage.setItem('lazertag_services', JSON.stringify(updatedList));
+    } catch {
+      // Ignore quota
+    }
 
     try {
       await dbSaveService(savedSrv);
@@ -589,7 +716,7 @@ export default function AdminPanel({
   const handleRefreshAllServicePhotos = async () => {
     const updated = localServices.map((srv, idx) => ({
       ...srv,
-      image: getFallbackServiceImage(srv, idx),
+      image: resolveServiceImage(srv, idx),
     }));
     setLocalServices(updated);
     if (onSaveServicesLive) onSaveServicesLive(updated);
@@ -1137,30 +1264,74 @@ export default function AdminPanel({
                       className="cursor-pointer flex items-center justify-center gap-1.5 bg-zinc-950 border border-orange-500/40 hover:border-orange-500 text-orange-400 px-4 py-2.5 rounded-xl text-xs font-bold transition-all"
                     >
                       <Upload className="w-4 h-4 text-orange-500" />
-                      Импорт из Excel
+                      {isParsingExcel ? 'Чтение файла и фото...' : 'Импорт из Excel (.xlsx)'}
                     </label>
                   </div>
                 </div>
 
                 {/* Excel Import Preview Window */}
-                {importStatus === 'previewing' && excelData && (
+                {(importStatus === 'previewing' || importStatus === 'importing') && excelWorkbook && currentExcelSheet && (
                   <div className="bg-zinc-950 border border-orange-500/40 p-5 rounded-2xl space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h5 className="text-xs font-black text-orange-400 uppercase tracking-widest flex items-center gap-1.5">
-                        <FileSpreadsheet className="w-4 h-4 text-orange-500" />
-                        Предпросмотр данных Excel ({excelData.length - 1} строк обнаружено)
-                      </h5>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h5 className="text-xs font-black text-orange-400 uppercase tracking-widest flex items-center gap-1.5">
+                          <FileSpreadsheet className="w-4 h-4 text-orange-500" />
+                          Автозагрузка прайса и фотографий из Excel ({excelPreviewRows.length} услуг найдено)
+                        </h5>
+                        <p className="text-[11px] text-zinc-400 mt-1">
+                          Фото из файла: <span className="text-orange-400 font-bold">{excelPreviewRows.filter(r => r.hasCustomPhoto).length} шт.</span>
+                          {excelWorkbook.embeddedImagesCount > 0 && (
+                            <span className="ml-2 text-emerald-400 font-bold">
+                              (включая {excelWorkbook.embeddedImagesCount} встроенных картинок внутри .xlsx)
+                            </span>
+                          )}
+                        </p>
+                      </div>
                       <button 
-                        onClick={() => setImportStatus('idle')}
-                        className="text-zinc-500 hover:text-white"
+                        onClick={() => {
+                          setImportStatus('idle');
+                          setExcelWorkbook(null);
+                        }}
+                        className="text-zinc-500 hover:text-white self-end sm:self-center"
                       >
                         <X className="w-4 h-4" />
                       </button>
                     </div>
 
-                    <p className="text-[11px] text-zinc-400 leading-relaxed">
-                      Сопоставьте колонки вашего Excel-файла с полями сайта (если колонки с фото нет в файле, система автоматически подберет тематическую обложку к каждой услуге):
-                    </p>
+                    {/* Multi-sheet selector if workbook has more than 1 sheet */}
+                    {excelWorkbook.sheets.length > 1 && (
+                      <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-zinc-900">
+                        <span className="text-[10px] font-bold text-zinc-400 uppercase">Листы книги Excel:</span>
+                        <button
+                          type="button"
+                          onClick={() => setImportAllSheets(true)}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                            importAllSheets
+                              ? 'bg-orange-600 text-white border-orange-500'
+                              : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
+                          }`}
+                        >
+                          Все листы ({excelWorkbook.sheets.length})
+                        </button>
+                        {excelWorkbook.sheets.map((sh, sIdx) => (
+                          <button
+                            key={sh.sheetName}
+                            type="button"
+                            onClick={() => {
+                              setImportAllSheets(false);
+                              handleSelectExcelSheet(sIdx);
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                              !importAllSheets && selectedSheetIdx === sIdx
+                                ? 'bg-orange-600 text-white border-orange-500'
+                                : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
+                            }`}
+                          >
+                            {sh.sheetName}
+                          </button>
+                        ))}
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                       <div>
@@ -1171,7 +1342,7 @@ export default function AdminPanel({
                           className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
                         >
                           <option value="">-- Выбрать --</option>
-                          {excelHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                          {currentExcelSheet.headers.map(h => <option key={h} value={h}>{h}</option>)}
                         </select>
                       </div>
 
@@ -1183,7 +1354,7 @@ export default function AdminPanel({
                           className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
                         >
                           <option value="">-- Выбрать --</option>
-                          {excelHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                          {currentExcelSheet.headers.map(h => <option key={h} value={h}>{h}</option>)}
                         </select>
                       </div>
 
@@ -1195,7 +1366,7 @@ export default function AdminPanel({
                           className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
                         >
                           <option value="">-- Авто --</option>
-                          {excelHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                          {currentExcelSheet.headers.map(h => <option key={h} value={h}>{h}</option>)}
                         </select>
                       </div>
 
@@ -1207,7 +1378,7 @@ export default function AdminPanel({
                           className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
                         >
                           <option value="">-- Пропустить --</option>
-                          {excelHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                          {currentExcelSheet.headers.map(h => <option key={h} value={h}>{h}</option>)}
                         </select>
                       </div>
 
@@ -1219,35 +1390,112 @@ export default function AdminPanel({
                           className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
                         >
                           <option value="">-- Пропустить --</option>
-                          {excelHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                          {currentExcelSheet.headers.map(h => <option key={h} value={h}>{h}</option>)}
                         </select>
                       </div>
 
                       <div>
-                        <label className="block text-[9px] font-black text-orange-400 uppercase mb-1">Фото (ссылка)</label>
+                        <label className="block text-[9px] font-black text-orange-400 uppercase mb-1">Фото (ячейка / картинка)</label>
                         <select
                           value={columnMapping.image}
                           onChange={(e) => setColumnMapping(prev => ({ ...prev, image: e.target.value }))}
                           className="w-full bg-zinc-900 text-xs text-white border border-orange-500/40 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
                         >
-                          <option value="">-- Авто-подбор --</option>
-                          {excelHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                          <option value="">-- Авто-поиск фото --</option>
+                          {currentExcelSheet.headers.map(h => <option key={h} value={h}>{h}</option>)}
                         </select>
                       </div>
                     </div>
 
-                    <div className="flex gap-2 justify-end pt-2">
+                    {/* Visual preview of parsed services & extracted photos */}
+                    {excelPreviewRows.length > 0 && (
+                      <div className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-3 max-h-56 overflow-y-auto space-y-2">
+                        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                          Предпросмотр услуг и распознанных фотографий:
+                        </div>
+                        {excelPreviewRows.slice(0, 30).map((rowItem, rIdx) => {
+                          const previewImg = resolveServiceImage(
+                            {
+                              name: rowItem.name,
+                              category: rowItem.category,
+                              description: rowItem.description,
+                              image: rowItem.rawImage,
+                            },
+                            rIdx
+                          );
+                          return (
+                            <div
+                              key={`${rowItem.sheetName}-${rowItem.rowIndex}-${rIdx}`}
+                              className="flex items-center justify-between gap-3 bg-zinc-950/90 border border-zinc-800/80 rounded-lg p-2"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <img
+                                  src={previewImg}
+                                  alt={rowItem.name}
+                                  onError={(e) => {
+                                    const proxied = getProxiedImageUrl(rowItem.rawImage, 400);
+                                    const target = e.currentTarget as HTMLImageElement;
+                                    if (proxied && target.src !== proxied) {
+                                      target.src = proxied;
+                                    } else {
+                                      target.src = getFallbackServiceImage(
+                                        { name: rowItem.name, category: rowItem.category },
+                                        rIdx
+                                      );
+                                    }
+                                  }}
+                                  className="w-12 h-9 object-cover rounded border border-zinc-700 shrink-0 bg-zinc-900"
+                                  referrerPolicy="no-referrer"
+                                />
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-400 border border-zinc-800">
+                                      {rowItem.category}
+                                    </span>
+                                    <span className="text-xs font-bold text-white truncate">
+                                      {rowItem.name}
+                                    </span>
+                                  </div>
+                                  <span className="block text-[10px] text-zinc-400 truncate">
+                                    {rowItem.hasCustomPhoto ? '✓ Фото подтянуто из файла' : '• Авто-обложка по теме'}
+                                  </span>
+                                </div>
+                              </div>
+                              <span className="text-xs font-black text-orange-400 whitespace-nowrap shrink-0">
+                                {Number(rowItem.price || 0).toLocaleString('ru-RU')} ₽
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap gap-2 justify-end pt-2">
                       <button
-                        onClick={() => setImportStatus('idle')}
-                        className="bg-zinc-900 border border-zinc-800 text-zinc-400 px-4 py-2 rounded-lg text-xs font-bold hover:text-white"
+                        type="button"
+                        onClick={() => {
+                          setImportStatus('idle');
+                          setExcelWorkbook(null);
+                        }}
+                        className="bg-zinc-900 border border-zinc-800 text-zinc-400 px-4 py-2 rounded-lg text-xs font-bold hover:text-white cursor-pointer"
                       >
-                        Сбросить
+                        Отмена
                       </button>
                       <button
-                        onClick={processExcelImport}
-                        className="bg-gradient-to-r from-orange-600 to-orange-500 text-white px-5 py-2 rounded-lg text-xs font-black hover:brightness-110 shadow"
+                        type="button"
+                        disabled={importStatus === 'importing'}
+                        onClick={() => processExcelImport(false)}
+                        className="bg-zinc-900 border border-orange-500/50 hover:bg-orange-950/40 text-orange-400 px-4 py-2 rounded-lg text-xs font-extrabold transition-all cursor-pointer"
                       >
-                        Импортировать услуги с фото
+                        {importStatus === 'importing' ? 'Загрузка...' : '+ Добавить к текущим услугам'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={importStatus === 'importing'}
+                        onClick={() => processExcelImport(true)}
+                        className="bg-gradient-to-r from-orange-600 to-orange-500 text-white px-5 py-2 rounded-lg text-xs font-black hover:brightness-110 shadow cursor-pointer"
+                      >
+                        {importStatus === 'importing' ? 'Сохраняем услуги и фото...' : 'Обновить прайс из этого файла'}
                       </button>
                     </div>
                   </div>
@@ -1256,7 +1504,7 @@ export default function AdminPanel({
                 {importStatus === 'success' && (
                   <div className="bg-orange-950/30 border border-orange-500/40 p-4 rounded-xl flex items-center gap-2.5 text-xs text-orange-300">
                     <Check className="w-5 h-5 shrink-0 text-orange-500" />
-                    <span>Прайс-лист и фотографии успешно импортированы и сохранены на сайте!</span>
+                    <span>Прайс-лист и все фотографии из Excel успешно импортированы и сохранены на сайте!</span>
                   </div>
                 )}
 
@@ -1403,6 +1651,7 @@ export default function AdminPanel({
                           src={resolveServiceImage(serviceForm)}
                           alt="Предпросмотр"
                           className="w-24 h-16 object-cover rounded-lg border border-zinc-700 shrink-0"
+                          referrerPolicy="no-referrer"
                         />
                         <div className="text-[10px] text-zinc-400 leading-tight">
                           <span className="font-bold text-white block mb-0.5">Превью карточки</span>
@@ -1466,9 +1715,16 @@ export default function AdminPanel({
                               src={resolveServiceImage(srv, idx)}
                               alt={srv.name}
                               onError={(e) => {
-                                (e.currentTarget as HTMLImageElement).src = getFallbackServiceImage(srv, idx);
+                                const target = e.currentTarget as HTMLImageElement;
+                                const proxied = getProxiedImageUrl(srv.image, 600);
+                                if (proxied && target.src !== proxied) {
+                                  target.src = proxied;
+                                } else {
+                                  target.src = getFallbackServiceImage(srv, idx);
+                                }
                               }}
                               className="w-16 h-12 object-cover rounded-lg border border-zinc-800 shrink-0 bg-zinc-900"
+                              referrerPolicy="no-referrer"
                             />
                             <div className="min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
@@ -1757,11 +2013,23 @@ export default function AdminPanel({
             {/* TAB 5: Reels / VK Clips Management */}
             {activeTab === 'reels' && (
               <div className="space-y-6">
-                <div>
-                  <h4 className="text-sm font-black text-white uppercase tracking-wider mb-1">Менеджер VK Клипов и Reels</h4>
-                  <p className="text-xs text-zinc-400">
-                    Вставьте любую ссылку на VK Клип (например, <span className="text-orange-400 font-mono">https://vk.com/clip-123456_789012</span>, <span className="text-orange-400 font-mono">https://vkvideo.ru/clip...</span> или код вставки iframe) — плеер ВКонтакте и превью-обложка подключатся автоматически!
-                  </p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h4 className="text-sm font-black text-white uppercase tracking-wider mb-1">Менеджер VK Клипов и Reels</h4>
+                    <p className="text-xs text-zinc-400">
+                      Вставьте любую ссылку на VK Клип, Rutube, Shorts или видео (<span className="text-orange-400 font-mono">https://vk.com/clip...</span>, <span className="text-orange-400 font-mono">https://vkvideo.ru/clip...</span>) — превью автоматически подтянется с первых кадров видео!
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isExtractingVideoFrame}
+                    onClick={handleRefreshAllReelVideoFrames}
+                    className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 hover:border-orange-500/50 text-zinc-300 hover:text-orange-400 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 self-start sm:self-auto"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 text-orange-500 ${isExtractingVideoFrame ? 'animate-spin' : ''}`} />
+                    {isExtractingVideoFrame ? 'Извлекаем кадры...' : 'Обновить превью из видео'}
+                  </button>
                 </div>
 
                 {/* Form to Add / Edit Reel */}
@@ -1794,18 +2062,24 @@ export default function AdminPanel({
                         className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
                       />
                       {reelForm.videoUrl && (
-                        <div className="mt-1.5 text-[10px] font-bold flex items-center gap-1.5">
+                        <div className="mt-1.5 text-[10px] font-bold flex items-center justify-between gap-2 flex-wrap">
                           {parsedReelPreview.type === 'vk' ? (
                             <span className="text-orange-400">
-                              ✓ Распознан VK Клип {parsedReelPreview.clipKey ? `(ID: ${parsedReelPreview.clipKey})` : ''} — встроенный плеер подключен
+                              ✓ Распознан VK Клип {parsedReelPreview.clipKey ? `(ID: ${parsedReelPreview.clipKey})` : ''} — авто-превью активно
                             </span>
                           ) : parsedReelPreview.type === 'youtube' || parsedReelPreview.type === 'rutube' ? (
                             <span className="text-orange-400">
-                              ✓ Распознан {parsedReelPreview.label} — встроенный плеер подключен
+                              ✓ Распознан {parsedReelPreview.label} — авто-превью активно
                             </span>
                           ) : (
                             <span className="text-zinc-400">
-                              Формат ссылки: {parsedReelPreview.label}
+                              Формат ссылки: {parsedReelPreview.label} (захват первого кадра)
+                            </span>
+                          )}
+                          {isExtractingVideoFrame && (
+                            <span className="text-amber-400 flex items-center gap-1">
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                              Извлекаем превью из видео...
                             </span>
                           )}
                         </div>
@@ -1853,10 +2127,20 @@ export default function AdminPanel({
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <label className="text-[11px] font-black text-orange-400 uppercase tracking-wider flex items-center gap-1.5">
                         <ImageIcon className="w-4 h-4 text-orange-500" />
-                        Превью-обложка клипа (загрузите фото, выберите шаблон или оставьте пустым для авто-обложки)
+                        Превью-обложка (подтягивается автоматически с первых кадров видео или загружается вручную)
                       </label>
 
-                      <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={isExtractingVideoFrame}
+                          onClick={handleForceExtractCurrentReelFrame}
+                          className="bg-zinc-950 hover:bg-zinc-800 border border-orange-500/40 text-orange-400 text-[11px] font-extrabold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${isExtractingVideoFrame ? 'animate-spin' : ''}`} />
+                          Кадр из видео
+                        </button>
+
                         <input
                           type="file"
                           accept="image/*"
@@ -1869,7 +2153,7 @@ export default function AdminPanel({
                           className="cursor-pointer bg-orange-600 hover:bg-orange-500 text-white text-[11px] font-extrabold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors"
                         >
                           <Upload className="w-3.5 h-3.5" />
-                          {isUploadingReelThumb ? 'Загрузка...' : 'Загрузить обложку с телефона / ПК'}
+                          {isUploadingReelThumb ? 'Загрузка...' : 'Своя обложка с ПК / телефона'}
                         </label>
                       </div>
                     </div>
@@ -1880,12 +2164,12 @@ export default function AdminPanel({
                           type="text"
                           value={reelForm.thumbnailUrl?.startsWith('data:image/') ? '' : (reelForm.thumbnailUrl || '')}
                           onChange={(e) => setReelForm(prev => ({ ...prev, thumbnailUrl: e.target.value }))}
-                          placeholder="Или вставьте ссылку на картинку обложки (https://...) — если пусто, создается фирменная обложка"
+                          placeholder="Оставьте пустым для авто-превью из первых кадров видео (или вставьте ссылку https://...)"
                           className="w-full bg-zinc-950 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500"
                         />
 
                         <div className="flex flex-wrap gap-1.5 items-center">
-                          <span className="text-[10px] font-bold text-zinc-400 mr-1">Фирменные обложки:</span>
+                          <span className="text-[10px] font-bold text-zinc-400 mr-1">Или шаблон:</span>
                           {REEL_PRESET_COVERS.map((preset) => (
                             <button
                               key={preset.id}
@@ -1908,11 +2192,23 @@ export default function AdminPanel({
                         <img
                           src={resolveReelThumbnail(reelForm)}
                           alt="Превью клипа"
+                          onError={(e) => {
+                            const target = e.currentTarget as HTMLImageElement;
+                            const proxied = getProxiedImageUrl(reelForm.thumbnailUrl, 400);
+                            if (proxied && target.src !== proxied) {
+                              target.src = proxied;
+                            } else {
+                              target.src = getFallbackReelCover(reelForm);
+                            }
+                          }}
                           className="w-14 h-20 object-cover rounded-lg border border-zinc-700 shrink-0"
+                          referrerPolicy="no-referrer"
                         />
                         <div className="text-[10px] text-zinc-400 leading-tight">
                           <span className="font-bold text-white block mb-0.5">Превью на сайте</span>
-                          Вертикальная карточка клипа 9:16
+                          {!isGeneratedPresetCover(reelForm.thumbnailUrl)
+                            ? '✓ Кадр из видео / фото подключено'
+                            : 'Авто-обложка 9:16'}
                         </div>
                       </div>
                     </div>
@@ -1953,7 +2249,13 @@ export default function AdminPanel({
                               src={resolveReelThumbnail(rl, idx)}
                               alt={rl.title}
                               onError={(e) => {
-                                (e.currentTarget as HTMLImageElement).src = getFallbackReelCover(rl, idx);
+                                const target = e.currentTarget as HTMLImageElement;
+                                const proxied = getProxiedImageUrl(rl.thumbnailUrl, 400);
+                                if (proxied && target.src !== proxied) {
+                                  target.src = proxied;
+                                } else {
+                                  target.src = getFallbackReelCover(rl, idx);
+                                }
                               }}
                               className="w-full h-full object-cover"
                               referrerPolicy="no-referrer"

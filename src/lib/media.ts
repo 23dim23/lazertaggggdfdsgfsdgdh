@@ -412,8 +412,28 @@ export function normalizeImageUrl(raw?: string): string {
   if (!trimmed) return '';
 
   // Data URLs or local assets are always valid
-  if (trimmed.startsWith('data:image/') || trimmed.startsWith('/assets/') || trimmed.startsWith('/src/')) {
+  if (
+    trimmed.startsWith('data:image/') ||
+    trimmed.startsWith('blob:') ||
+    trimmed.startsWith('/assets/') ||
+    trimmed.startsWith('/src/')
+  ) {
     return trimmed;
+  }
+
+  // Protocol-relative URLs (e.g. //avatars.mds.yandex.net/...)
+  if (trimmed.startsWith('//')) {
+    trimmed = 'https:' + trimmed;
+  }
+
+  // Bare common image host domains without protocol
+  if (
+    !/^https?:\/\//i.test(trimmed) &&
+    /^(www\.|avatars\.mds\.yandex\.net|sun\d+-\d+\.userapi\.com|i\.ibb\.co|i\.postimg\.cc|imgur\.com|i\.imgur\.com|drive\.google\.com|disk\.yandex\.|yadi\.sk)/i.test(
+      trimmed
+    )
+  ) {
+    trimmed = 'https://' + trimmed;
   }
 
   // If Excel cell has multiple URLs separated by comma, semicolon, or whitespace/newlines, grab the first URL
@@ -422,8 +442,15 @@ export function normalizeImageUrl(raw?: string): string {
     trimmed = urlMatch[0];
   }
 
+  // Strip trailing punctuation accidentally captured from text
+  trimmed = trimmed.replace(/[).,;]+$/, '');
+
   // Reject video page URLs accidentally pasted into image fields
-  if (/vk\.com\/(clip|video|clips)|vkvideo\.ru|youtube\.com\/(watch|shorts)|youtu\.be|rutube\.ru/i.test(trimmed)) {
+  if (
+    /vk\.com\/(clip|video|clips)|vkvideo\.ru|youtube\.com\/(watch|shorts)|youtu\.be|rutube\.ru/i.test(
+      trimmed
+    )
+  ) {
     return '';
   }
 
@@ -436,13 +463,67 @@ export function normalizeImageUrl(raw?: string): string {
     return '';
   }
 
-  // Convert Google Drive sharing links to direct image render links
-  const gdriveMatch = trimmed.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/i);
-  if (gdriveMatch) {
-    return `https://lh3.googleusercontent.com/d/${gdriveMatch[1]}`;
+  // Convert all Google Drive sharing link variants to direct image render links
+  const gdriveFileMatch =
+    trimmed.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/i) ||
+    trimmed.match(/drive\.google\.com\/(?:open|uc|thumbnail)\?(?:[^#]*&)?id=([a-zA-Z0-9_-]+)/i) ||
+    trimmed.match(/lh3\.googleusercontent\.com\/d\/([a-zA-Z0-9_-]+)/i);
+  if (gdriveFileMatch) {
+    return `https://lh3.googleusercontent.com/d/${gdriveFileMatch[1]}=w1000`;
+  }
+
+  // Convert Dropbox share links to direct raw image links
+  if (/dropbox\.com\//i.test(trimmed)) {
+    return trimmed
+      .replace('www.dropbox.com', 'dl.dropboxusercontent.com')
+      .replace(/[?&]dl=0\b/i, '')
+      .replace(/[?&]dl=1\b/i, '');
   }
 
   return trimmed;
+}
+
+/**
+ * Returns a proxied image URL via wsrv.nl to bypass hotlink/CORS/Referer blocks on external image hosts.
+ */
+export function getProxiedImageUrl(rawUrl?: string, width = 800): string {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  const trimmed = rawUrl.trim();
+  if (
+    !trimmed ||
+    trimmed.startsWith('data:') ||
+    trimmed.startsWith('blob:') ||
+    trimmed.startsWith('/') ||
+    trimmed.includes('wsrv.nl')
+  ) {
+    return '';
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return `https://wsrv.nl/?url=${encodeURIComponent(trimmed)}&w=${width}&q=85&output=jpg`;
+  }
+  return '';
+}
+
+/**
+ * Resolves a public Yandex Disk link (https://disk.yandex.ru/i/... or https://yadi.sk/i/...)
+ * into a direct viewable image URL via Yandex's official public REST API.
+ */
+export async function resolveYandexDiskImageUrl(publicUrl: string): Promise<string | null> {
+  try {
+    const apiUrl = `https://cloud-api.yandex.net/v1/disk/public/resources?public_key=${encodeURIComponent(
+      publicUrl.trim()
+    )}&preview_size=XL`;
+    const resp = await fetch(apiUrl);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const directUrl = data?.file || data?.preview;
+    if (directUrl && typeof directUrl === 'string') {
+      return getProxiedImageUrl(directUrl, 800) || directUrl;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -511,13 +592,15 @@ export function parseVideoSource(rawInput?: string): ParsedVideoSource {
       const id = urlObj.searchParams.get('id');
       const hash = urlObj.searchParams.get('hash');
       if (oid && id) {
+        const clipKey = `${oid}_${id}`;
         const embedUrl = `https://vk.com/video_ext.php?oid=${oid}&id=${id}&hd=2&autoplay=1${hash ? `&hash=${hash}` : ''}`;
         return {
           type: 'vk',
           embedUrl,
           directUrl: `https://vk.com/clip${oid}_${id}`,
           label: 'VK Клип',
-          clipKey: `${oid}_${id}`,
+          clipKey,
+          autoThumbnail: getCachedVideoThumbnail(input) || getCachedVideoThumbnail(clipKey),
         };
       }
     } catch {
@@ -528,19 +611,16 @@ export function parseVideoSource(rawInput?: string): ParsedVideoSource {
       embedUrl: input,
       directUrl: input,
       label: 'VK Клип',
+      autoThumbnail: getCachedVideoThumbnail(input),
     };
   }
 
   // 3. Check standard VK Clip / VK Video URL formats:
-  // Examples:
-  // - https://vk.com/clip-21123456_456239017
-  // - https://vkvideo.ru/clip-21123456_456239017
-  // - https://vk.com/video-21123456_456239017
-  // - https://vk.com/clips-21123456?z=clip-21123456_456239017
   const vkMatch = input.match(/(?:clip|video)(-?\d+)_(\d+)/i);
   if (vkMatch) {
     const oid = vkMatch[1];
     const id = vkMatch[2];
+    const clipKey = `${oid}_${id}`;
     const hashMatch = input.match(/[?&]hash=([a-zA-Z0-9_-]+)/i);
     const hashParam = hashMatch ? `&hash=${hashMatch[1]}` : '';
     return {
@@ -548,7 +628,8 @@ export function parseVideoSource(rawInput?: string): ParsedVideoSource {
       embedUrl: `https://vk.com/video_ext.php?oid=${oid}&id=${id}&hd=2&autoplay=1${hashParam}`,
       directUrl: `https://vk.com/clip${oid}_${id}`,
       label: 'VK Клип',
-      clipKey: `${oid}_${id}`,
+      clipKey,
+      autoThumbnail: getCachedVideoThumbnail(input) || getCachedVideoThumbnail(clipKey),
     };
   }
 
@@ -573,9 +654,10 @@ export function parseVideoSource(rawInput?: string): ParsedVideoSource {
     return {
       type: 'rutube',
       embedUrl: `https://rutube.ru/play/embed/${rtId}`,
-      directUrl: input,
+      directUrl: `https://rutube.ru/video/${rtId}/`,
       label: 'Rutube Клип',
       clipKey: rtId,
+      autoThumbnail: getCachedVideoThumbnail(input) || getCachedVideoThumbnail(rtId),
     };
   }
 
@@ -586,6 +668,7 @@ export function parseVideoSource(rawInput?: string): ParsedVideoSource {
       embedUrl: input,
       directUrl: input,
       label: 'ВКонтакте',
+      autoThumbnail: getCachedVideoThumbnail(input),
     };
   }
 
@@ -595,7 +678,334 @@ export function parseVideoSource(rawInput?: string): ParsedVideoSource {
     embedUrl: input,
     directUrl: input,
     label: 'Видео HD',
+    autoThumbnail: getCachedVideoThumbnail(input),
   };
+}
+
+const VIDEO_THUMB_CACHE_KEY = 'lazertag_video_frames_v2';
+const memoryVideoThumbCache: Record<string, string> = {};
+
+function loadVideoThumbCache(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(VIDEO_THUMB_CACHE_KEY);
+    if (!raw) return memoryVideoThumbCache;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      Object.assign(memoryVideoThumbCache, parsed);
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  return memoryVideoThumbCache;
+}
+
+function saveVideoThumbToCache(keys: string[], thumbUrl: string): void {
+  if (!thumbUrl) return;
+  const cache = loadVideoThumbCache();
+  for (const k of keys) {
+    if (k) cache[k.trim()] = thumbUrl;
+  }
+  try {
+    localStorage.setItem(VIDEO_THUMB_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // Ignore quota errors
+  }
+}
+
+export function getCachedVideoThumbnail(key?: string): string | undefined {
+  if (!key) return undefined;
+  const cache = loadVideoThumbCache();
+  return cache[key.trim()];
+}
+
+/**
+ * Checks if a thumbnail URL is one of our generated SVG fallback covers or empty.
+ */
+export function isGeneratedPresetCover(url?: string): boolean {
+  if (!url || !url.trim()) return true;
+  const s = url.trim();
+  if (s.startsWith('data:image/svg+xml')) return true;
+  if (s.includes('photo-1511512578047-dfb367046420')) return true;
+  return false;
+}
+
+/**
+ * Captures the first frame (at ~0.5s) from a direct MP4/WebM video URL using HTML5 <video> + <canvas>.
+ */
+function captureDirectVideoFirstFrame(videoUrl: string, timeoutMs = 7000): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (typeof document === 'undefined') {
+      resolve(null);
+      return;
+    }
+
+    let settled = false;
+    const video = document.createElement('video');
+    const finish = (val: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+      } catch {
+        // Ignore cleanup errors
+      }
+      resolve(val);
+    };
+
+    const timer = setTimeout(() => finish(null), timeoutMs);
+
+    video.crossOrigin = 'anonymous';
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+
+    video.onloadedmetadata = () => {
+      // Seek to 0.5s (or 15% of short clips) to avoid 0.0s black fade-in frames
+      const targetTime =
+        video.duration && isFinite(video.duration)
+          ? Math.min(0.8, Math.max(0.15, video.duration * 0.1))
+          : 0.4;
+      try {
+        video.currentTime = targetTime;
+      } catch {
+        // If seeking fails, try drawing immediately on loadeddata
+      }
+    };
+
+    const drawFrame = () => {
+      try {
+        const vw = video.videoWidth || 540;
+        const vh = video.videoHeight || 960;
+        if (!vw || !vh) {
+          finish(null);
+          return;
+        }
+        const maxW = 540;
+        const maxH = 960;
+        const ratio = Math.min(maxW / vw, maxH / vh, 1);
+        const w = Math.max(1, Math.round(vw * ratio));
+        const h = Math.max(1, Math.round(vh * ratio));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          finish(null);
+          return;
+        }
+        ctx.drawImage(video, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        finish(dataUrl && dataUrl.length > 200 ? dataUrl : null);
+      } catch {
+        // Canvas tainted due to CORS
+        finish(null);
+      }
+    };
+
+    video.onseeked = drawFrame;
+    video.onloadeddata = () => {
+      // Fallback if onseeked doesn't fire within 800ms
+      setTimeout(() => {
+        if (!settled) drawFrame();
+      }, 800);
+    };
+    video.onerror = () => finish(null);
+
+    video.src = videoUrl;
+  });
+}
+
+function isValidExtractedVideoPoster(url?: string): boolean {
+  if (!url || typeof url !== 'string') return false;
+  const s = url.trim();
+  if (!/^https?:\/\//i.test(s)) return false;
+  // Filter out generic VK / social network site logos that aren't video frames
+  if (
+    /vk\.com\/images\/(icons|share|camera|video_placeholder|deactivated)|vk_share|logo_vk|favicon|apple-touch-icon|yastatic\.net\/s3\/home/i.test(
+      s
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Extracts a VK video/clip first-frame URL from raw VK HTML or embed HTML.
+ */
+function parseVkPosterFromHtml(html: string): string | null {
+  if (!html) return null;
+
+  // 1. Look for explicit first_frame_800 / first_frame_320 / thumb in VK player JSON
+  const jsonFramePatterns = [
+    /"first_frame_800"\s*:\s*"([^"]+)"/i,
+    /"first_frame_1280"\s*:\s*"([^"]+)"/i,
+    /"first_frame_320"\s*:\s*"([^"]+)"/i,
+    /"thumb"\s*:\s*"(https?:\\?\/\\?\/[^"]+)"/i,
+    /"jpg"\s*:\s*"(https?:\\?\/\\?\/[^"]+)"/i,
+    /background-image:\s*url\(['"]?(https?:\/\/[^'")]+(?:userapi\.com|mycdn\.me|vkuser)[^'")]+)['"]?\)/i,
+  ];
+
+  for (const regex of jsonFramePatterns) {
+    const m = html.match(regex);
+    if (m && m[1]) {
+      const cleaned = m[1].replace(/\\\//g, '/').replace(/&amp;/g, '&');
+      if (isValidExtractedVideoPoster(cleaned)) {
+        return cleaned;
+      }
+    }
+  }
+
+  // 2. Look for <meta property="og:image" content="...">
+  const ogMatch =
+    html.match(/<meta\b[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i) ||
+    html.match(/<meta\b[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i) ||
+    html.match(/<meta\b[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i);
+
+  if (ogMatch && ogMatch[1]) {
+    const cleaned = ogMatch[1].replace(/&amp;/g, '&').trim();
+    if (isValidExtractedVideoPoster(cleaned)) {
+      return cleaned;
+    }
+  }
+
+  return null;
+}
+
+async function fetchWithTimeout(url: string, timeoutMs = 4500): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Automatically extracts a preview thumbnail from the first frames / metadata of any clip link
+ * (VK Clips, VK Video, Rutube, YouTube Shorts, or direct MP4/WebM video links).
+ */
+export async function extractVideoThumbnail(rawVideoUrl?: string): Promise<string | null> {
+  if (!rawVideoUrl || !rawVideoUrl.trim()) return null;
+
+  const parsed = parseVideoSource(rawVideoUrl);
+  const cacheKeys = [rawVideoUrl.trim(), parsed.directUrl, parsed.clipKey || ''].filter(Boolean);
+
+  // 1. Check cache first
+  for (const k of cacheKeys) {
+    const cached = getCachedVideoThumbnail(k);
+    if (cached) return cached;
+  }
+
+  // 2. YouTube Shorts / Video
+  if (parsed.type === 'youtube' && parsed.autoThumbnail) {
+    saveVideoThumbToCache(cacheKeys, parsed.autoThumbnail);
+    return parsed.autoThumbnail;
+  }
+
+  // 3. Direct MP4 / WebM video stream -> capture actual first frame via <video> + <canvas>
+  if (parsed.type === 'mp4' && parsed.embedUrl) {
+    const captured = await captureDirectVideoFirstFrame(parsed.embedUrl);
+    if (captured) {
+      saveVideoThumbToCache(cacheKeys, captured);
+      return captured;
+    }
+  }
+
+  // 4. Rutube Shorts / Video -> query Rutube oEmbed / Video API + Microlink
+  if (parsed.type === 'rutube' && parsed.clipKey) {
+    const rtId = parsed.clipKey;
+    const rtEndpoints = [
+      `https://rutube.ru/api/oembed/?url=${encodeURIComponent(`https://rutube.ru/video/${rtId}/`)}&format=json`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://rutube.ru/api/video/${rtId}/?format=json`)}`,
+      `https://api.microlink.io/?url=${encodeURIComponent(parsed.directUrl)}`,
+    ];
+
+    for (const ep of rtEndpoints) {
+      try {
+        const resp = await fetchWithTimeout(ep, 4000);
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        const rawThumb =
+          data?.thumbnail_url || data?. data?.image?.url || data?.data?.logo?.url;
+        if (rawThumb && isValidExtractedVideoPoster(rawThumb)) {
+          const proxied = getProxiedImageUrl(rawThumb, 600) || rawThumb;
+          saveVideoThumbToCache(cacheKeys, proxied);
+          return proxied;
+        }
+      } catch {
+        // Try next endpoint
+      }
+    }
+  }
+
+  // 5. VK Clips / VK Video / External links
+  if (parsed.type === 'vk' || parsed.type === 'external') {
+    const targetUrls = [
+      parsed.directUrl,
+      parsed.clipKey ? `https://vk.com/video${parsed.clipKey}` : '',
+      parsed.clipKey ? `https://m.vk.com/video${parsed.clipKey}` : '',
+      parsed.embedUrl,
+    ].filter(Boolean);
+
+    // 5a. Try Microlink API first (fast JSON OpenGraph + headless metadata)
+    for (const tUrl of targetUrls.slice(0, 2)) {
+      try {
+        const resp = await fetchWithTimeout(
+          `https://api.microlink.io/?url=${encodeURIComponent(tUrl)}`,
+          4500
+        );
+        if (resp.ok) {
+          const json = await resp.json();
+          const imgUrl = json?.data?.image?.url;
+          if (imgUrl && isValidExtractedVideoPoster(imgUrl)) {
+            const proxied = getProxiedImageUrl(imgUrl, 600) || imgUrl;
+            saveVideoThumbToCache(cacheKeys, proxied);
+            return proxied;
+          }
+        }
+      } catch {
+        // Continue to HTML proxy extraction
+      }
+    }
+
+    // 5b. Scrape VK video page / embed page via CORS proxies for first_frame_800 / og:image
+    const urlsToScrape = [
+      parsed.clipKey ? `https://m.vk.com/video${parsed.clipKey}` : parsed.directUrl,
+      parsed.directUrl,
+      parsed.embedUrl,
+    ].filter(Boolean);
+
+    for (const scrapeTarget of urlsToScrape) {
+      const proxyUrls = [
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(scrapeTarget)}`,
+        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(scrapeTarget)}`,
+      ];
+
+      for (const pUrl of proxyUrls) {
+        try {
+          const resp = await fetchWithTimeout(pUrl, 4500);
+          if (!resp.ok) continue;
+          const html = await resp.text();
+          const posterUrl = parseVkPosterFromHtml(html);
+          if (posterUrl) {
+            const proxied = getProxiedImageUrl(posterUrl, 600) || posterUrl;
+            saveVideoThumbToCache(cacheKeys, proxied);
+            return proxied;
+          }
+        } catch {
+          // Try next proxy
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 export function getFallbackReelCover(reel: Partial<Reel>, index = 0): string {
@@ -613,14 +1023,31 @@ export function getFallbackReelCover(reel: Partial<Reel>, index = 0): string {
 
 export function resolveReelThumbnail(reel: Partial<Reel>, index = 0): string {
   const rawThumb = reel.thumbnailUrl?.trim() || '';
-  // Ignore old generic unsplash default if it was auto-assigned or if empty
   const isOldGenericDefault =
     !rawThumb ||
     rawThumb.includes('photo-1511512578047-dfb367046420?auto=format&fit=crop&q=80&w=300');
 
-  if (!isOldGenericDefault) {
+  // If reel has a real custom photo or extracted video frame (not a generated SVG preset), use it
+  if (!isOldGenericDefault && !rawThumb.startsWith('data:image/svg+xml')) {
     const normalized = normalizeImageUrl(rawThumb);
     if (normalized) return normalized;
+  }
+
+  // Check if we have an automatically extracted video frame in cache for this clip's videoUrl
+  if (reel.videoUrl) {
+    const parsed = parseVideoSource(reel.videoUrl);
+    if (parsed.autoThumbnail) {
+      return parsed.autoThumbnail;
+    }
+    const cachedFrame = getCachedVideoThumbnail(reel.videoUrl);
+    if (cachedFrame) {
+      return cachedFrame;
+    }
+  }
+
+  // If the user explicitly selected one of the SVG presets, return it
+  if (rawThumb.startsWith('data:image/svg+xml')) {
+    return rawThumb;
   }
 
   return getFallbackReelCover(reel, index);

@@ -1,7 +1,16 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Play, Pause, Volume2, VolumeX, Heart, Share2, Flame, X, ChevronRight, MessageCircle, ExternalLink, Video } from 'lucide-react';
 import { Reel } from '../types';
-import { parseVideoSource, resolveReelThumbnail, getFallbackReelCover, useTransparentLogo } from '../lib/media';
+import {
+  parseVideoSource,
+  resolveReelThumbnail,
+  getFallbackReelCover,
+  getProxiedImageUrl,
+  extractVideoThumbnail,
+  isGeneratedPresetCover,
+  useTransparentLogo
+} from '../lib/media';
+import { saveReel } from '../lib/db';
 
 interface ReelsWidgetProps {
   reels: Reel[];
@@ -13,7 +22,9 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
   const [likedReels, setLikedReels] = useState<{ [id: string]: boolean }>({});
-  const [failedThumbs, setFailedThumbs] = useState<{ [id: string]: boolean }>({});
+  // 0 = direct, 1 = proxied via wsrv.nl, 2 = fallback cover
+  const [thumbStage, setThumbStage] = useState<{ [id: string]: number }>({});
+  const [autoThumbs, setAutoThumbs] = useState<{ [id: string]: string }>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [comments, setComments] = useState<{ [id: string]: { author: string; text: string }[] }>({
     'reel-1': [
@@ -32,6 +43,26 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const logoSrc = useTransparentLogo();
+
+  // Automatically extract first-frame previews for any clip that doesn't have a custom photo
+  useEffect(() => {
+    let cancelled = false;
+    reels.forEach((reel) => {
+      if (!reel.videoUrl) return;
+      if (!isGeneratedPresetCover(reel.thumbnailUrl) || autoThumbs[reel.id]) return;
+
+      extractVideoThumbnail(reel.videoUrl).then((extracted) => {
+        if (cancelled || !extracted) return;
+        setAutoThumbs((prev) => ({ ...prev, [reel.id]: extracted }));
+        setThumbStage((prev) => ({ ...prev, [reel.id]: 0 }));
+        // Save the extracted frame to storage so subsequent visits have it immediately
+        saveReel({ ...reel, thumbnailUrl: extracted }).catch(() => {});
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [reels]);
 
   const handleOpenReel = (reel: Reel, idx: number) => {
     setActiveReel(reel);
@@ -108,33 +139,69 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {reels.map((reel, idx) => {
             const parsed = parseVideoSource(reel.videoUrl);
-            const fallbackCover = getFallbackReelCover(reel, idx);
-            const coverSrc = failedThumbs[reel.id]
-              ? fallbackCover
-              : resolveReelThumbnail(reel, idx);
+            const effectiveReel: Reel = autoThumbs[reel.id]
+              ? { ...reel, thumbnailUrl: autoThumbs[reel.id] }
+              : reel;
+            const primaryCover = resolveReelThumbnail(effectiveReel, idx);
+            const proxiedCover = getProxiedImageUrl(primaryCover, 600);
+            const fallbackCover = getFallbackReelCover(effectiveReel, idx);
+            const stage = thumbStage[reel.id] || 0;
+
+            const coverSrc =
+              stage === 0
+                ? primaryCover
+                : stage === 1 && proxiedCover
+                ? proxiedCover
+                : fallbackCover;
+
             const isAutoCover = coverSrc.startsWith('data:image/svg+xml');
+            const showLiveMp4FirstFrame =
+              parsed.type === 'mp4' && Boolean(parsed.embedUrl) && isAutoCover;
 
             return (
               <div 
                 key={reel.id}
                 className="group relative h-[430px] rounded-2xl overflow-hidden cursor-pointer border border-zinc-800 bg-zinc-900 hover:border-orange-500/60 hover:shadow-xl hover:shadow-orange-950/30 transition-all duration-300"
-                onClick={() => handleOpenReel(reel, idx)}
+                onClick={() => handleOpenReel(effectiveReel, idx)}
               >
                 {/* Image Preview with resilient fallback */}
                 <img 
                   src={coverSrc} 
                   alt={reel.title}
                   onError={() => {
-                    if (!failedThumbs[reel.id]) {
-                      setFailedThumbs(prev => ({ ...prev, [reel.id]: true }));
-                    }
+                    setThumbStage(prev => {
+                      const current = prev[reel.id] || 0;
+                      if (current === 0 && proxiedCover) return { ...prev, [reel.id]: 1 };
+                      if (current < 2) return { ...prev, [reel.id]: 2 };
+                      return prev;
+                    });
                   }}
                   className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                   referrerPolicy="no-referrer"
                 />
 
-                {/* If auto-generated tactical cover, also show club shield emblem */}
-                {isAutoCover && (
+                {/* If it's a direct MP4/WebM video without a captured dataUrl cover, render the live video seeked to 0.5s as the first-frame preview */}
+                {showLiveMp4FirstFrame && (
+                  <video
+                    src={parsed.embedUrl.includes('#') ? parsed.embedUrl : `${parsed.embedUrl}#t=0.5`}
+                    muted
+                    playsInline
+                    preload="metadata"
+                    onLoadedMetadata={(e) => {
+                      try {
+                        if (e.currentTarget.currentTime < 0.2) {
+                          e.currentTarget.currentTime = 0.5;
+                        }
+                      } catch {
+                        // Ignore seek error
+                      }
+                    }}
+                    className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 pointer-events-none"
+                  />
+                )}
+
+                {/* If auto-generated tactical cover and not live video, also show club shield emblem */}
+                {isAutoCover && !showLiveMp4FirstFrame && (
                   <div className="absolute top-14 left-1/2 -translate-x-1/2 pointer-events-none opacity-90 transition-transform duration-300 group-hover:scale-105">
                     <img src={logoSrc} alt="" className="w-24 h-24 object-contain drop-shadow-lg" />
                   </div>
