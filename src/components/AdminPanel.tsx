@@ -2087,7 +2087,7 @@ export default function AdminPanel({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-1">Тег / Категория</label>
                       <select
@@ -2108,15 +2108,6 @@ export default function AdminPanel({
                         type="text"
                         value={reelForm.duration || '0:15'}
                         onChange={(e) => setReelForm(prev => ({ ...prev, duration: e.target.value }))}
-                        className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-1">Просмотры (например 4.2K)</label>
-                      <input
-                        type="text"
-                        value={reelForm.plays || '1.5K'}
-                        onChange={(e) => setReelForm(prev => ({ ...prev, plays: e.target.value }))}
                         className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
                       />
                     </div>

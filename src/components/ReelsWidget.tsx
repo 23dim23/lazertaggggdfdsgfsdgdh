@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, Volume2, VolumeX, Heart, Share2, Flame, X, ChevronRight, MessageCircle, ExternalLink, Video } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Flame, X, ChevronRight, ExternalLink, Video } from 'lucide-react';
 import { Reel } from '../types';
 import {
   parseVideoSource,
@@ -21,28 +21,24 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
   const [activeReelIndex, setActiveReelIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
-  const [likedReels, setLikedReels] = useState<{ [id: string]: boolean }>({});
   // 0 = direct, 1 = proxied via wsrv.nl, 2 = fallback cover
   const [thumbStage, setThumbStage] = useState<{ [id: string]: number }>({});
   const [autoThumbs, setAutoThumbs] = useState<{ [id: string]: string }>({});
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [comments, setComments] = useState<{ [id: string]: { author: string; text: string }[] }>({
-    'reel-1': [
-      { author: 'Светлана К.', text: 'Праздновали у вас на прошлой неделе, сын просто в восторге! 🔥' },
-      { author: 'Игорь И.', text: 'Крутые сценарии! Обязательно придем еще.' }
-    ],
-    'reel-2': [
-      { author: 'Юлия Т.', text: 'Для корпоратива действительно классная разрядка 👍' },
-      { author: 'Павел С.', text: 'Битва отделов — это было легендарно!' }
-    ],
-    'reel-3': [
-      { author: 'Анна Д.', text: 'Полигон в лесу супер! Спецэффекты и дым огонь!' }
-    ]
-  });
-  const [newComment, setNewComment] = useState('');
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const logoSrc = useTransparentLogo();
+
+  // Close player on Escape key
+  useEffect(() => {
+    if (!activeReel) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setActiveReel(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [activeReel]);
 
   // Automatically extract first-frame previews for any clip that doesn't have a custom photo
   useEffect(() => {
@@ -91,22 +87,6 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
       videoRef.current.muted = !isMuted;
       setIsMuted(!isMuted);
     }
-  };
-
-  const toggleLike = (reelId: string) => {
-    setLikedReels(prev => ({
-      ...prev,
-      [reelId]: !prev[reelId]
-    }));
-  };
-
-  const handleAddComment = (reelId: string) => {
-    if (!newComment.trim()) return;
-    setComments(prev => ({
-      ...prev,
-      [reelId]: [...(prev[reelId] || []), { author: 'Гость клуба', text: newComment }]
-    }));
-    setNewComment('');
   };
 
   const activeParsed = activeReel ? parseVideoSource(activeReel.videoUrl) : null;
@@ -225,16 +205,6 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
                   )}
                 </div>
 
-                {/* Top Right: Heart count and play counter */}
-                <div className="absolute top-4 right-4 flex items-center gap-2.5 text-white text-xs font-bold bg-zinc-950/75 border border-zinc-800 backdrop-blur-md px-2.5 py-1 rounded-lg tabular-nums">
-                  <span className="flex items-center gap-1">
-                    <Heart className="w-3.5 h-3.5 text-orange-500 fill-orange-500" />
-                    {(Number(reel.likes) || 0) + (likedReels[reel.id] ? 1 : 0)}
-                  </span>
-                  <span className="text-zinc-600">·</span>
-                  <span>{reel.plays || '1.2K'}</span>
-                </div>
-
                 {/* Center Play Button */}
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="w-16 h-16 rounded-full bg-orange-600/85 group-hover:bg-orange-500 border-2 border-white/80 flex items-center justify-center backdrop-blur-sm transition-all duration-200 transform group-hover:scale-110 shadow-xl shadow-black/60">
@@ -251,9 +221,11 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
                     <span className="flex items-center">
                       Смотреть {parsed.label} <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
                     </span>
-                    <span className="text-zinc-400 font-mono text-[11px] bg-zinc-950/80 px-2 py-0.5 rounded border border-zinc-800">
-                      {reel.duration || '0:15'}
-                    </span>
+                    {reel.duration && (
+                      <span className="text-zinc-400 font-mono text-[11px] bg-zinc-950/80 px-2 py-0.5 rounded border border-zinc-800">
+                        {reel.duration}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -262,21 +234,36 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
         </div>
       </div>
 
-      {/* Interactive Reels / VK Clips Modal Player */}
+      {/* Clean Video Player Modal (without likes, views, comments, or share sidebar) */}
       {activeReel && activeParsed && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-3 sm:p-4">
-          <div className="relative w-full max-w-4xl bg-zinc-950 rounded-2xl border border-zinc-800 overflow-hidden flex flex-col md:flex-row h-[88vh] max-h-[740px] shadow-2xl">
-            {/* Close Button */}
-            <button 
-              onClick={handleCloseReel}
-              className="absolute top-3.5 right-3.5 z-50 w-10 h-10 rounded-full bg-zinc-900/90 hover:bg-orange-600 border border-zinc-700 flex items-center justify-center text-white transition-colors cursor-pointer"
-              aria-label="Закрыть плеер"
-            >
-              <X className="w-5 h-5" />
-            </button>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-3 sm:p-4"
+          onClick={handleCloseReel}
+        >
+          <div
+            className="relative w-full max-w-md bg-zinc-950 rounded-2xl border border-zinc-800 overflow-hidden flex flex-col h-[85vh] max-h-[760px] shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Clean Top Bar with Title & Close Button */}
+            <div className="flex items-center justify-between gap-3 px-4 py-3 bg-zinc-950 border-b border-zinc-800 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <img src={logoSrc} alt="" className="w-7 h-7 object-contain shrink-0" />
+                <h4 className="text-sm font-extrabold text-white truncate">
+                  {activeReel.title}
+                </h4>
+              </div>
+              <button 
+                type="button"
+                onClick={handleCloseReel}
+                className="w-9 h-9 rounded-full bg-zinc-900 hover:bg-orange-600 border border-zinc-700 flex items-center justify-center text-white transition-colors cursor-pointer shrink-0"
+                aria-label="Закрыть плеер"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-            {/* Left Side: Vertical Video / VK Clip Embed Player */}
-            <div className="relative flex-1 bg-black flex flex-col items-center justify-center h-[58%] md:h-full overflow-hidden">
+            {/* Video Player Area */}
+            <div className="relative flex-1 bg-black flex flex-col items-center justify-center overflow-hidden">
               {activeParsed.type === 'vk' || activeParsed.type === 'youtube' || activeParsed.type === 'rutube' ? (
                 <div className="relative w-full h-full flex flex-col bg-black">
                   <iframe
@@ -287,21 +274,6 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
                     allow="autoplay; encrypted-media; fullscreen; picture-in-picture; screen-wake-lock;"
                     allowFullScreen
                   />
-                  {/* Direct link bar in case user prefers native VK app or clip has strict embed settings */}
-                  <div className="bg-zinc-950 border-t border-zinc-800 px-4 py-2.5 flex items-center justify-between gap-2">
-                    <span className="text-xs text-zinc-400 font-semibold truncate">
-                      {activeParsed.label}: {activeReel.title}
-                    </span>
-                    <a
-                      href={activeParsed.directUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs font-extrabold px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0"
-                    >
-                      <span>Открыть в {activeParsed.type === 'vk' ? 'VK' : 'плеере'}</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  </div>
                 </div>
               ) : activeParsed.type === 'external' ? (
                 <div className="p-8 text-center flex flex-col items-center justify-center h-full max-w-sm">
@@ -312,16 +284,13 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
                   />
                   <Video className="w-10 h-10 text-orange-500 mb-3" />
                   <h4 className="text-base font-black text-white mb-2">{activeReel.title}</h4>
-                  <p className="text-xs text-zinc-400 mb-5">
-                    Этот видеоролик размещен напрямую на странице сообщества ВКонтакте.
-                  </p>
                   <a
                     href={activeParsed.directUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-amber-500 text-white text-xs font-black uppercase tracking-wider px-5 py-3 rounded-xl flex items-center gap-2 shadow-lg"
+                    className="mt-2 bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-amber-500 text-white text-xs font-black uppercase tracking-wider px-5 py-3 rounded-xl flex items-center gap-2 shadow-lg"
                   >
-                    <span>Смотреть клип ВКонтакте</span>
+                    <span>Открыть видео</span>
                     <ExternalLink className="w-4 h-4" />
                   </a>
                 </div>
@@ -336,21 +305,24 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
                     loop
                     muted={isMuted}
                     playsInline
+                    onClick={togglePlay}
                     referrerPolicy="no-referrer"
                   />
 
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/30 pointer-events-none" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/20 pointer-events-none" />
 
-                  {/* Controls inside MP4 video */}
+                  {/* Minimal Player Controls for MP4 video */}
                   <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between text-white z-10">
                     <div className="flex items-center gap-3">
                       <button 
+                        type="button"
                         onClick={togglePlay}
                         className="w-10 h-10 rounded-full bg-black/70 hover:bg-orange-600 border border-zinc-700 flex items-center justify-center transition-colors cursor-pointer"
                       >
                         {isPlaying ? <Pause className="w-4 h-4 text-white" /> : <Play className="w-4 h-4 text-white fill-white ml-0.5" />}
                       </button>
                       <button 
+                        type="button"
                         onClick={toggleMute}
                         className="w-10 h-10 rounded-full bg-black/70 hover:bg-orange-600 border border-zinc-700 flex items-center justify-center transition-colors cursor-pointer"
                       >
@@ -358,98 +330,14 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
                       </button>
                     </div>
 
-                    <div className="text-xs bg-black/70 px-2.5 py-1.5 rounded-md font-mono border border-zinc-800">
-                      {activeReel.duration}
-                    </div>
-                  </div>
-
-                  {/* Top badge */}
-                  <div className="absolute top-4 left-4 z-10 bg-zinc-950/85 border border-orange-500/40 px-3 py-1 rounded-lg text-xs font-extrabold text-orange-400">
-                    ЛАЗЕР КВЕСТ • СОЧИ
+                    {activeReel.duration && (
+                      <div className="text-xs bg-black/70 px-2.5 py-1.5 rounded-md font-mono border border-zinc-800">
+                        {activeReel.duration}
+                      </div>
+                    )}
                   </div>
                 </>
               )}
-            </div>
-
-            {/* Right Side: Comments & Interaction */}
-            <div className="w-full md:w-[360px] border-t md:border-t-0 md:border-l border-zinc-800 flex flex-col justify-between bg-zinc-950 h-[42%] md:h-full">
-              {/* Header */}
-              <div className="p-4 border-b border-zinc-900 flex items-center gap-3">
-                <img src={logoSrc} alt="Лазер Квест" className="w-10 h-10 object-contain shrink-0" />
-                <div className="min-w-0 pr-10">
-                  <h4 className="text-sm font-extrabold text-white truncate">Лазер Квест Сочи</h4>
-                  <p className="text-xs text-zinc-400 truncate">{activeReel.title}</p>
-                </div>
-              </div>
-
-              {/* Interactive buttons */}
-              <div className="px-4 py-3 bg-zinc-900/50 border-b border-zinc-900 flex justify-around items-center">
-                <button 
-                  onClick={() => toggleLike(activeReel.id)}
-                  className="flex flex-col items-center gap-1 group/btn cursor-pointer"
-                >
-                  <Heart className={`w-6 h-6 transition-transform group-hover/btn:scale-110 ${likedReels[activeReel.id] ? 'text-orange-500 fill-orange-500' : 'text-zinc-400'}`} />
-                  <span className="text-[10px] font-bold text-zinc-400 tabular-nums">
-                    {(Number(activeReel.likes) || 0) + (likedReels[activeReel.id] ? 1 : 0)}
-                  </span>
-                </button>
-
-                <div className="flex flex-col items-center gap-1">
-                  <MessageCircle className="w-6 h-6 text-zinc-400" />
-                  <span className="text-[10px] font-bold text-zinc-400 tabular-nums">{comments[activeReel.id]?.length || 0}</span>
-                </div>
-
-                <button 
-                  onClick={() => {
-                    navigator.clipboard?.writeText(activeParsed.directUrl || window.location.href);
-                    setCopiedId(activeReel.id);
-                    setTimeout(() => setCopiedId(null), 2000);
-                  }}
-                  className="flex flex-col items-center gap-1 group/btn cursor-pointer"
-                >
-                  <Share2 className="w-6 h-6 text-zinc-400 group-hover/btn:text-orange-400 transition-colors" />
-                  <span className="text-[10px] font-bold text-zinc-400">
-                    {copiedId === activeReel.id ? 'Скопировано!' : 'Поделиться'}
-                  </span>
-                </button>
-              </div>
-
-              {/* Comments Scrollable Area */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                <div className="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-2">Комментарии игроков</div>
-                {(comments[activeReel.id] || []).length === 0 ? (
-                  <p className="text-xs text-zinc-500">Пока нет комментариев. Напишите первый!</p>
-                ) : (
-                  (comments[activeReel.id] || []).map((c, i) => (
-                    <div key={i} className="text-xs bg-zinc-900/70 p-2.5 rounded-lg border border-zinc-800">
-                      <div className="font-bold text-orange-400 mb-1">{c.author}</div>
-                      <div className="text-zinc-300 leading-relaxed">{c.text}</div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Add Comment Input */}
-              <div className="p-4 border-t border-zinc-900 bg-zinc-900/30">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    placeholder="Написать комментарий..."
-                    className="flex-1 bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleAddComment(activeReel.id);
-                    }}
-                  />
-                  <button 
-                    onClick={() => handleAddComment(activeReel.id)}
-                    className="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-3.5 py-2 rounded-lg transition-colors cursor-pointer"
-                  >
-                    Отправить
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -457,3 +345,4 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
     </section>
   );
 }
+
