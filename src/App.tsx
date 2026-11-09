@@ -285,12 +285,6 @@ export default function App() {
     if (el) el.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Scroll to Reels Atmosphere helper
-  const scrollToAtmosphere = () => {
-    const el = document.getElementById('atmosphere-vibe');
-    if (el) el.scrollIntoView({ behavior: 'smooth' });
-  };
-
   // Scroll to active section container helper
   const handleSectionChange = (id: string) => {
     setActiveSectionId(id);
@@ -312,7 +306,8 @@ export default function App() {
         heroTitle: sec.heroTitle,
         heroSubtitle: sec.heroSubtitle,
         description: sec.description,
-        contentMarkdown: sec.contentMarkdown
+        contentMarkdown: sec.contentMarkdown,
+        packages: sec.packages
       };
       return acc;
     }, {} as { [id: string]: Partial<Section> }),
@@ -365,10 +360,10 @@ export default function App() {
           <Hero 
             onExplore={scrollToServices}
             onOpenBooking={handleOpenGeneralBooking}
-            onOpenAtmosphere={scrollToAtmosphere}
             heroTitle={currentSection.heroTitle}
             heroSubtitle={currentSection.heroSubtitle}
             promoBadge={contacts.promoBadge}
+            contacts={contacts}
           />
 
           {/* Atmospheric Reels / VK Clips block */}
@@ -406,6 +401,7 @@ export default function App() {
         onClose={() => setIsBookingOpen(false)}
         packageName={selectedBookingPackage}
         packagePrice={selectedBookingPrice}
+        contacts={contacts}
       />
 
       {/* Passcode protected Administration Dashboard */}
@@ -418,6 +414,7 @@ export default function App() {
           reels={reels}
           onSaveReels={setReels}
           onSaveServicesLive={setServices}
+          onSaveContactsLive={setContacts}
           onClose={() => setIsAdminOpen(false)}
         />
       )}

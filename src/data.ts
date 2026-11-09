@@ -354,6 +354,16 @@ export const INITIAL_REELS: Reel[] = [
   }
 ];
 
+export const DEFAULT_ADVANTAGES: string[] = [
+  'Как пейнтбол только без шариков и боли',
+  'Более 15 площадок рядом с вами',
+  'Ведущий на все время игры',
+  'Разные сценарии по мотивам видео игр',
+  'Легкое оружие специально для детей',
+  'Провели 300+ праздников в Сочи, Адлере, Дагомысе и Красной Поляне',
+  '100+ положительных отзывов в картах'
+];
+
 export const DEFAULT_CONTACTS: ContactInfo = {
   phone: '+7 (985) 132-83-22',
   email: 'info@laserkvest.ru',
@@ -362,5 +372,10 @@ export const DEFAULT_CONTACTS: ContactInfo = {
   yandexMapWidgetUrl: 'https://yandex.ru/map-widget/v1/?ll=39.9547%2C43.4542&z=11&l=map',
   vkUrl: 'https://vk.com/laserkvest',
   telegramUrl: 'https://t.me/laserkvest_sochi',
-  promoBadge: 'СКИДКА -15% НА ДЕНЬ РОЖДЕНИЯ В БУДНИ!'
+  maxUrl: 'https://clck.ru/3WWJke',
+  whatsappUrl: 'https://clck.ru/3WsHUN',
+  siteBookingUrl: '',
+  promoBadge: 'СКИДКА -15% НА ДЕНЬ РОЖДЕНИЯ В БУДНИ!',
+  advantages: DEFAULT_ADVANTAGES
 };
+

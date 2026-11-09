@@ -287,7 +287,17 @@ export async function deleteReview(id: string): Promise<void> {
 
 // --- Contacts DB Sync ---
 export async function getContacts(): Promise<ContactInfo> {
-  const localContacts = readLocal<ContactInfo>(STORAGE_KEYS.contacts, DEFAULT_CONTACTS);
+  const rawLocal = readLocal<ContactInfo>(STORAGE_KEYS.contacts, DEFAULT_CONTACTS);
+  const localContacts: ContactInfo = {
+    ...DEFAULT_CONTACTS,
+    ...rawLocal,
+    maxUrl: rawLocal.maxUrl || DEFAULT_CONTACTS.maxUrl,
+    whatsappUrl: rawLocal.whatsappUrl || DEFAULT_CONTACTS.whatsappUrl,
+    advantages:
+      rawLocal.advantages && rawLocal.advantages.length > 0
+        ? rawLocal.advantages
+        : DEFAULT_CONTACTS.advantages,
+  };
   if (!firestoreOnline) return localContacts;
 
   const path = 'config/contacts';
@@ -302,9 +312,19 @@ export async function getContacts(): Promise<ContactInfo> {
       writeLocal(STORAGE_KEYS.contacts, localContacts);
       return localContacts;
     }
-    const data = docSnap.data() as ContactInfo;
-    writeLocal(STORAGE_KEYS.contacts, data);
-    return data;
+    const dbData = docSnap.data() as ContactInfo;
+    const merged: ContactInfo = {
+      ...DEFAULT_CONTACTS,
+      ...dbData,
+      maxUrl: dbData.maxUrl || DEFAULT_CONTACTS.maxUrl,
+      whatsappUrl: dbData.whatsappUrl || DEFAULT_CONTACTS.whatsappUrl,
+      advantages:
+        dbData.advantages && dbData.advantages.length > 0
+          ? dbData.advantages
+          : DEFAULT_CONTACTS.advantages,
+    };
+    writeLocal(STORAGE_KEYS.contacts, merged);
+    return merged;
   } catch (error) {
     if (isOfflineOrTimeoutError(error)) firestoreOnline = false;
     handleFirestoreError(error, OperationType.GET, path);

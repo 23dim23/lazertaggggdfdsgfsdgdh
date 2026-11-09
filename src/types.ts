@@ -65,14 +65,21 @@ export interface ContactInfo {
   vkUrl?: string;
   telegramUrl?: string;
   instagramUrl?: string;
+  maxUrl?: string;
+  whatsappUrl?: string;
+  siteBookingUrl?: string;
+  telegramBotToken?: string;
+  telegramChatId?: string;
   yandexMetrikaId?: string;
   promoBadge?: string;
+  advantages?: string[];
 }
 
 export interface Lead {
   id: string;
   name: string;
   phone: string;
+  district?: string;
   date: string;
   guests: string;
   comment: string;
@@ -89,3 +96,4 @@ export interface AdminSettings {
   reviews: Review[];
   contacts: ContactInfo;
 }
+

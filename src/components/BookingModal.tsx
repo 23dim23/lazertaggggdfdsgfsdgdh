@@ -1,18 +1,23 @@
 import React, { useState } from 'react';
-import { X, Calendar, Users, Phone, User, Check, Flame, MessageSquare } from 'lucide-react';
+import { X, Calendar, Users, Phone, User, Check, Flame, MessageSquare, MapPin } from 'lucide-react';
 import { saveLead } from '../lib/db';
-import { Lead } from '../types';
+import { sendLeadToTelegram } from '../lib/telegram';
+import { Lead, ContactInfo } from '../types';
 
 interface BookingModalProps {
   isOpen: boolean;
   onClose: () => void;
   packageName?: string;
   packagePrice?: number;
+  contacts?: ContactInfo;
 }
 
-export default function BookingModal({ isOpen, onClose, packageName, packagePrice }: BookingModalProps) {
+const DISTRICTS = ['Сочи', 'Адлер', 'Дагомыс', 'Красная Поляна'] as const;
+
+export default function BookingModal({ isOpen, onClose, packageName, packagePrice, contacts }: BookingModalProps) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [district, setDistrict] = useState<string>('Сочи');
   const [date, setDate] = useState('');
   const [guests, setGuests] = useState('10');
   const [comment, setComment] = useState('');
@@ -29,9 +34,10 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
       id: 'lead_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
       name,
       phone,
+      district,
       date: date || new Date().toISOString().split('T')[0],
       guests: guests || '10',
-      comment: comment || '',
+      comment: comment ? `[Район: ${district}] ${comment}` : `Район: ${district}`,
       packageName,
       packagePrice,
       createdAt: new Date().toISOString(),
@@ -39,7 +45,10 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
     };
 
     try {
-      await saveLead(newLead);
+      await Promise.allSettled([
+        saveLead(newLead),
+        sendLeadToTelegram(newLead, contacts),
+      ]);
       setLoading(false);
       setIsSubmitted(true);
     } catch (err) {
@@ -52,6 +61,7 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
   const handleReset = () => {
     setName('');
     setPhone('');
+    setDistrict('Сочи');
     setDate('');
     setGuests('10');
     setComment('');
@@ -59,13 +69,23 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
     onClose();
   };
 
+  const appendQuickComment = (option: string) => {
+    setComment((prev) => {
+      const trimmed = prev.trim();
+      if (!trimmed) return option;
+      if (trimmed.toLowerCase().includes(option.toLowerCase())) return trimmed;
+      return `${trimmed}, ${option}`;
+    });
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
-      <div className="relative w-full max-w-lg bg-zinc-950 border border-zinc-800 rounded-2xl overflow-hidden shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto">
+      <div className="relative w-full max-w-lg bg-zinc-950 border border-zinc-800 rounded-2xl overflow-hidden shadow-2xl my-auto">
         {/* Tactical orange header bar */}
         <div className="h-1.5 w-full bg-gradient-to-r from-orange-600 via-orange-500 to-amber-500" />
 
         <button 
+          type="button"
           onClick={onClose}
           className="absolute top-4 right-4 text-zinc-400 hover:text-white transition-colors cursor-pointer"
         >
@@ -74,7 +94,7 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
 
         {!isSubmitted ? (
           <form onSubmit={handleSubmit} className="p-6 sm:p-8">
-            <div className="mb-6">
+            <div className="mb-5">
               <span className="text-xs font-black uppercase tracking-wider text-orange-400 px-2.5 py-1 bg-orange-950/50 border border-orange-500/30 rounded-lg">
                 Бронирование игры
               </span>
@@ -130,6 +150,29 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
                 </div>
               </div>
 
+              {/* 3.1 District ("Ваш район") */}
+              <div>
+                <label className="block text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1.5">
+                  Ваш район
+                </label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-zinc-500 pointer-events-none">
+                    <MapPin className="w-4 h-4 text-orange-500" />
+                  </span>
+                  <select
+                    value={district}
+                    onChange={(e) => setDistrict(e.target.value)}
+                    className="w-full bg-zinc-900 text-white text-sm border border-zinc-800 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:ring-1 focus:ring-orange-500 cursor-pointer"
+                  >
+                    {DISTRICTS.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 {/* Date */}
                 <div>
@@ -165,9 +208,23 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
                 </div>
               </div>
 
-              {/* Comments */}
+              {/* 3.2 Comments */}
               <div>
-                <label className="block text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Комментарий или пожелания</label>
+                <label className="block text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1.5">
+                  Комментарий
+                </label>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {['Поиграть', 'Беседку с мангалом', 'Кафе', 'Пикник'].map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => appendQuickComment(opt)}
+                      className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-orange-500/20 text-zinc-300 hover:text-orange-400 border border-zinc-800 hover:border-orange-500/40 transition-colors cursor-pointer"
+                    >
+                      + {opt}
+                    </button>
+                  ))}
+                </div>
                 <div className="relative">
                   <span className="absolute top-3 left-3 text-zinc-500">
                     <MessageSquare className="w-4 h-4" />
@@ -175,7 +232,7 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
                   <textarea
                     value={comment}
                     onChange={(e) => setComment(e.target.value)}
-                    placeholder="Укажите возраст детей, сюжет квеста или другие пожелания..."
+                    placeholder={'Вы хотите только: "поиграть, беседку с мангалом, кафе, пикник?"'}
                     rows={2}
                     className="w-full bg-zinc-900 text-white text-sm border border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-orange-500 resize-none"
                   />
@@ -183,7 +240,7 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
               </div>
             </div>
 
-            <div className="mt-8 flex gap-4">
+            <div className="mt-6 flex gap-4">
               <button
                 type="button"
                 onClick={onClose}
@@ -214,9 +271,10 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
             </div>
             <h3 className="text-2xl font-black text-white">Заявка принята!</h3>
             <p className="text-zinc-400 text-sm mt-2 max-w-sm">
-              Благодарим за обращение. Координатор праздников свяжется с вами по номеру <span className="text-orange-400 font-bold">{phone}</span> в течение ближайших 10 минут для подтверждения бронирования.
+              Благодарим за обращение ({district}). Координатор праздников свяжется с вами по номеру <span className="text-orange-400 font-bold">{phone}</span> в течение ближайших 10 минут для подтверждения бронирования.
             </p>
             <button
+              type="button"
               onClick={handleReset}
               className="mt-8 bg-zinc-900 border border-zinc-800 text-white hover:bg-zinc-800 font-bold py-2.5 px-6 rounded-xl transition-colors cursor-pointer"
             >
@@ -228,3 +286,4 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
     </div>
   );
 }
+

@@ -217,15 +217,10 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
                   <h3 className="text-white text-base font-extrabold line-clamp-2 leading-snug drop-shadow-md">
                     {reel.title}
                   </h3>
-                  <div className="mt-2 flex items-center justify-between text-xs text-orange-400 font-bold group-hover:text-orange-300 transition-colors">
+                  <div className="mt-2 flex items-center text-xs text-orange-400 font-bold group-hover:text-orange-300 transition-colors">
                     <span className="flex items-center">
                       Смотреть {parsed.label} <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
                     </span>
-                    {reel.duration && (
-                      <span className="text-zinc-400 font-mono text-[11px] bg-zinc-950/80 px-2 py-0.5 rounded border border-zinc-800">
-                        {reel.duration}
-                      </span>
-                    )}
                   </div>
                 </div>
               </div>
@@ -312,7 +307,7 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
                   <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/20 pointer-events-none" />
 
                   {/* Minimal Player Controls for MP4 video */}
-                  <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between text-white z-10">
+                  <div className="absolute bottom-4 left-4 right-4 flex items-center justify-start text-white z-10">
                     <div className="flex items-center gap-3">
                       <button 
                         type="button"
@@ -329,12 +324,6 @@ export default function ReelsWidget({ reels }: ReelsWidgetProps) {
                         {isMuted ? <VolumeX className="w-4 h-4 text-zinc-400" /> : <Volume2 className="w-4 h-4 text-orange-400" />}
                       </button>
                     </div>
-
-                    {activeReel.duration && (
-                      <div className="text-xs bg-black/70 px-2.5 py-1.5 rounded-md font-mono border border-zinc-800">
-                        {activeReel.duration}
-                      </div>
-                    )}
                   </div>
                 </>
               )}

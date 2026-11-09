@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { 
   Lock, Settings, Eye, EyeOff, Edit, Plus, Trash2, FileSpreadsheet, Check, 
   X, AlertCircle, Save, PlusCircle, RefreshCw, Upload, Flame, MapPin, MessageSquare,
-  Play, Video, Calendar, Phone, Users, Download, Image as ImageIcon
+  Play, Video, Calendar, Phone, Users, Download, Image as ImageIcon, Send
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Section, Service, Review, ContactInfo, AdminSettings, Reel, Lead } from '../types';
+import { Section, Service, Review, ContactInfo, AdminSettings, Reel, Lead, Package } from '../types';
+import { DEFAULT_ADVANTAGES } from '../data';
+import { sendTestTelegramMessage } from '../lib/telegram';
 import { 
   getLeads, saveLead, deleteLead, 
   saveService as dbSaveService, deleteService as dbDeleteService,
@@ -44,6 +46,7 @@ interface AdminPanelProps {
   reels: Reel[];
   onSaveReels?: (newReels: Reel[]) => void;
   onSaveServicesLive?: (newServices: Service[]) => void;
+  onSaveContactsLive?: (newContacts: ContactInfo) => void;
   onClose: () => void;
 }
 
@@ -55,6 +58,7 @@ export default function AdminPanel({
   reels,
   onSaveReels,
   onSaveServicesLive,
+  onSaveContactsLive,
   onClose 
 }: AdminPanelProps) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -122,7 +126,16 @@ export default function AdminPanel({
     }))
   );
   const [localReviews, setLocalReviews] = useState<Review[]>([...settings.reviews]);
-  const [localContacts, setLocalContacts] = useState<ContactInfo>({ ...settings.contacts });
+  const [localContacts, setLocalContacts] = useState<ContactInfo>(() => ({
+    ...settings.contacts,
+    maxUrl: settings.contacts.maxUrl || 'https://clck.ru/3WWJke',
+    whatsappUrl: settings.contacts.whatsappUrl || 'https://clck.ru/3WsHUN',
+    siteBookingUrl: settings.contacts.siteBookingUrl || '',
+    advantages:
+      settings.contacts.advantages && settings.contacts.advantages.length > 0
+        ? [...settings.contacts.advantages]
+        : [...DEFAULT_ADVANTAGES],
+  }));
   const [localSections, setLocalSections] = useState<Section[]>([...sections]);
   const [localReels, setLocalReels] = useState<Reel[]>(() =>
     reels.map((rl, idx) => ({
@@ -132,6 +145,7 @@ export default function AdminPanel({
   );
   const [localLeads, setLocalLeads] = useState<Lead[]>([]);
   const [isLoadingLeads, setIsLoadingLeads] = useState(false);
+  const [isTestingTelegram, setIsTestingTelegram] = useState(false);
 
   // Form states for adding/editing sections, services, reviews, reels
   const [showSectionAddForm, setShowSectionAddForm] = useState(false);
@@ -228,6 +242,136 @@ export default function AdminPanel({
     setLocalSections(prev => prev.map(sec => 
       sec.id === id ? { ...sec, [field]: value } : sec
     ));
+  };
+
+  // Save a single section (including its packages) immediately to live state & Firestore
+  const handleSaveSectionNow = async (sectionId: string) => {
+    const target = localSections.find(s => s.id === sectionId);
+    if (!target) return;
+    onSaveSections(localSections);
+    try {
+      await dbSaveSection(target);
+      showToast(`Раздел «${target.title}» и его пакеты сохранены на сайте!`);
+    } catch (err) {
+      console.error(err);
+      showToast('Раздел сохранен локально.');
+    }
+  };
+
+  // Package management helpers inside a section
+  const handleAddPackageToSection = (sectionId: string) => {
+    const newPkg: Package = {
+      id: `pkg-${Date.now()}`,
+      name: 'Новый пакет «Стандарт»',
+      price: 15000,
+      duration: '2 часа',
+      playersCount: 'до 10 игроков',
+      features: [
+        '2 часа активной игры в лазертаг',
+        'Профессиональный ведущий-инструктор',
+        'Аренда уютной беседки или зоны отдыха'
+      ],
+      isPopular: false
+    };
+    setLocalSections(prev =>
+      prev.map(sec =>
+        sec.id === sectionId
+          ? { ...sec, packages: [...(sec.packages || []), newPkg] }
+          : sec
+      )
+    );
+  };
+
+  const handleUpdatePackageInSection = (
+    sectionId: string,
+    pkgId: string,
+    updater: (pkg: Package) => Package
+  ) => {
+    setLocalSections(prev =>
+      prev.map(sec =>
+        sec.id === sectionId
+          ? {
+              ...sec,
+              packages: (sec.packages || []).map(p => (p.id === pkgId ? updater(p) : p))
+            }
+          : sec
+      )
+    );
+  };
+
+  const handleDeletePackageFromSection = (sectionId: string, pkgId: string) => {
+    setLocalSections(prev =>
+      prev.map(sec =>
+        sec.id === sectionId
+          ? { ...sec, packages: (sec.packages || []).filter(p => p.id !== pkgId) }
+          : sec
+      )
+    );
+  };
+
+  // Advantages management helpers
+  const handleAdvantageChange = (idx: number, val: string) => {
+    setLocalContacts(prev => {
+      const list = [...(prev.advantages || DEFAULT_ADVANTAGES)];
+      list[idx] = val;
+      return { ...prev, advantages: list };
+    });
+  };
+
+  const handleAddAdvantage = () => {
+    setLocalContacts(prev => ({
+      ...prev,
+      advantages: [...(prev.advantages || DEFAULT_ADVANTAGES), 'Новое преимущество клуба']
+    }));
+  };
+
+  const handleRemoveAdvantage = (idx: number) => {
+    setLocalContacts(prev => ({
+      ...prev,
+      advantages: (prev.advantages || DEFAULT_ADVANTAGES).filter((_, i) => i !== idx)
+    }));
+  };
+
+  const handleResetAdvantages = () => {
+    setLocalContacts(prev => ({
+      ...prev,
+      advantages: [...DEFAULT_ADVANTAGES]
+    }));
+    showToast('Восстановлены преимущества по умолчанию.');
+  };
+
+  const handleSaveContactsNow = async (toastText = 'Настройки, ссылки и преимущества сохранены на сайте!') => {
+    if (onSaveContactsLive) onSaveContactsLive(localContacts);
+    try {
+      await dbSaveContacts(localContacts);
+      showToast(toastText);
+    } catch (err) {
+      console.error(err);
+      showToast('Сохранено локально.');
+    }
+  };
+
+  const handleTestTelegram = async () => {
+    if (!localContacts.telegramBotToken?.trim() || !localContacts.telegramChatId?.trim()) {
+      showToast('Заполните Telegram Bot Token и Chat ID для проверки!');
+      return;
+    }
+    setIsTestingTelegram(true);
+    try {
+      await dbSaveContacts(localContacts).catch(() => {});
+      if (onSaveContactsLive) onSaveContactsLive(localContacts);
+      const res = await sendTestTelegramMessage(
+        localContacts.telegramBotToken,
+        localContacts.telegramChatId
+      );
+      if (res.ok) {
+        showToast('Тестовое сообщение успешно отправлено в Telegram!');
+      } else {
+        showToast(`Ошибка Telegram: ${res.error}`);
+      }
+    } finally {
+      setIsTestingTelegram(false);
+    }
   };
 
   // Add a new custom website section
@@ -508,6 +652,7 @@ export default function AdminPanel({
       '№': i + 1,
       'Имя': l.name,
       'Телефон': l.phone,
+      'Район': l.district || 'Сочи',
       'Дата игры': l.date,
       'Количество гостей': l.guests,
       'Пакет / Тариф': l.packageName || 'Общая заявка',
@@ -810,6 +955,7 @@ export default function AdminPanel({
   // Save all changes to the main parent state & Firestore
   const handleSaveAll = () => {
     onSaveSections(localSections);
+    if (onSaveContactsLive) onSaveContactsLive(localContacts);
 
     const newSettings: AdminSettings = {
       visibleSections: localSections.reduce((acc, sec) => {
@@ -821,7 +967,8 @@ export default function AdminPanel({
           heroTitle: sec.heroTitle,
           heroSubtitle: sec.heroSubtitle,
           description: sec.description,
-          contentMarkdown: sec.contentMarkdown
+          contentMarkdown: sec.contentMarkdown,
+          packages: sec.packages
         };
         return acc;
       }, {} as { [id: string]: Partial<Section> }),
@@ -983,7 +1130,7 @@ export default function AdminPanel({
               }`}
             >
               <Settings className="w-4 h-4" />
-              Разделы сайта ({localSections.length})
+              Разделы и Пакеты ({localSections.length})
             </button>
 
             <button
@@ -1007,7 +1154,7 @@ export default function AdminPanel({
               }`}
             >
               <MapPin className="w-4 h-4" />
-              Контакты и Карта
+              Контакты и Ссылки
             </button>
 
             <button
@@ -1026,21 +1173,88 @@ export default function AdminPanel({
           {/* Admin Content Area */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-zinc-900/30">
             
-            {/* TAB 1: Sections Content & Visibility */}
+            {/* TAB 1: Sections Content, Advantages & Packages (Tariffs) */}
             {activeTab === 'sections' && (
               <div className="space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
-                    <h4 className="text-sm font-black text-white uppercase tracking-wider mb-1">Редактор разделов сайта</h4>
-                    <p className="text-xs text-zinc-400">Включайте и выключайте разделы, редактируйте заголовки и описания страниц.</p>
+                    <h4 className="text-sm font-black text-white uppercase tracking-wider mb-1">
+                      Редактор разделов, преимуществ и пакетов («Под ключ»)
+                    </h4>
+                    <p className="text-xs text-zinc-400">
+                      Редактируйте блок «Преимущества» на главной, тексты разделов и карточки тарифов/пакетов (Дни рождения, Корпоративы, Выпускные и др.).
+                    </p>
                   </div>
                   <button
                     onClick={() => setShowSectionAddForm(!showSectionAddForm)}
-                    className="flex items-center gap-1.5 px-4 py-2.5 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-bold transition-all self-start sm:self-center cursor-pointer"
+                    className="flex items-center gap-1.5 px-4 py-2.5 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-bold transition-all self-start sm:self-center cursor-pointer shrink-0"
                   >
                     <Plus className="w-4 h-4" />
                     Создать раздел
                   </button>
+                </div>
+
+                {/* Advantages Editor Block */}
+                <div className="bg-zinc-950 border border-orange-500/40 rounded-2xl p-5 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-800">
+                    <div>
+                      <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest bg-orange-500/10 border border-orange-500/30 px-2 py-0.5 rounded">
+                        ГЛАВНАЯ СТРАНИЦА
+                      </span>
+                      <h5 className="text-sm font-black text-white mt-1.5">
+                        Раздел «Наши преимущества» ({(localContacts.advantages || DEFAULT_ADVANTAGES).length})
+                      </h5>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleResetAdvantages}
+                        className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-white text-[11px] font-bold transition-colors cursor-pointer"
+                      >
+                        Сбросить по умолчанию
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAddAdvantage}
+                        className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-orange-500/40 text-orange-400 text-[11px] font-extrabold flex items-center gap-1 transition-colors cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Добавить пункт
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSaveContactsNow('Раздел «Преимущества» успешно сохранен!')}
+                        className="px-4 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-colors cursor-pointer shadow"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        Сохранить преимущества
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {(localContacts.advantages || DEFAULT_ADVANTAGES).map((adv, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <span className="text-orange-500 font-black text-xs w-6 text-center shrink-0">
+                          ✅
+                        </span>
+                        <input
+                          type="text"
+                          value={adv}
+                          onChange={(e) => handleAdvantageChange(idx, e.target.value)}
+                          className="flex-1 bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAdvantage(idx)}
+                          className="w-8 h-8 rounded-lg bg-red-950/20 border border-red-900/30 hover:bg-red-900 text-red-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                          title="Удалить преимущество"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 {showSectionAddForm && (
@@ -1143,10 +1357,10 @@ export default function AdminPanel({
                   </form>
                 )}
 
-                <div className="space-y-4">
+                <div className="space-y-5">
                   {localSections.map((sec) => (
-                    <div key={sec.id} className="bg-zinc-950/80 border border-zinc-800 rounded-2xl p-5">
-                      <div className="flex items-center justify-between mb-4 pb-4 border-b border-zinc-800">
+                    <div key={sec.id} className="bg-zinc-950/80 border border-zinc-800 rounded-2xl p-5 space-y-5">
+                      <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-zinc-800">
                         <div className="flex items-center gap-3">
                           <span className="text-xs font-black text-orange-400 uppercase tracking-widest bg-orange-500/10 border border-orange-500/30 px-2 py-0.5 rounded">
                             {sec.id.toUpperCase()}
@@ -1154,8 +1368,9 @@ export default function AdminPanel({
                           <h5 className="text-sm font-black text-white">{sec.title}</h5>
                           {sec.id !== 'home' && (
                             <button
+                              type="button"
                               onClick={() => handleDeleteSection(sec.id)}
-                              className="text-zinc-500 hover:text-red-400 p-1 rounded-lg transition-all ml-1"
+                              className="text-zinc-500 hover:text-red-400 p-1 rounded-lg transition-all ml-1 cursor-pointer"
                               title="Удалить этот раздел"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -1163,26 +1378,38 @@ export default function AdminPanel({
                           )}
                         </div>
 
-                        <button
-                          onClick={() => toggleSectionActive(sec.id)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all cursor-pointer ${
-                            sec.isActive
-                              ? 'bg-orange-950/50 text-orange-400 border-orange-500/40'
-                              : 'bg-zinc-900 text-zinc-500 border-zinc-800'
-                          }`}
-                        >
-                          {sec.isActive ? (
-                            <>
-                              <Eye className="w-3.5 h-3.5" />
-                              Активен на сайте
-                            </>
-                          ) : (
-                            <>
-                              <EyeOff className="w-3.5 h-3.5" />
-                              Скрыт
-                            </>
-                          )}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleSectionActive(sec.id)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all cursor-pointer ${
+                              sec.isActive
+                                ? 'bg-orange-950/50 text-orange-400 border-orange-500/40'
+                                : 'bg-zinc-900 text-zinc-500 border-zinc-800'
+                            }`}
+                          >
+                            {sec.isActive ? (
+                              <>
+                                <Eye className="w-3.5 h-3.5" />
+                                Активен на сайте
+                              </>
+                            ) : (
+                              <>
+                                <EyeOff className="w-3.5 h-3.5" />
+                                Скрыт
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleSaveSectionNow(sec.id)}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-orange-600 hover:bg-orange-500 text-white transition-all cursor-pointer shadow"
+                          >
+                            <Save className="w-3.5 h-3.5" />
+                            Сохранить раздел
+                          </button>
+                        </div>
                       </div>
 
                       <div className="space-y-3.5">
@@ -1217,16 +1444,203 @@ export default function AdminPanel({
                           />
                         </div>
 
-                        <div>
-                          <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-1">Основное текстовое наполнение</label>
-                          <textarea
-                            value={sec.description || ''}
-                            onChange={(e) => handleSectionTextChange(sec.id, 'description', e.target.value)}
-                            rows={3}
-                            className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 resize-none"
-                          />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-1">Основное текстовое наполнение</label>
+                            <textarea
+                              value={sec.description || ''}
+                              onChange={(e) => handleSectionTextChange(sec.id, 'description', e.target.value)}
+                              rows={3}
+                              className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 resize-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-1">Дополнительный абзац описания</label>
+                            <textarea
+                              value={sec.contentMarkdown || ''}
+                              onChange={(e) => handleSectionTextChange(sec.id, 'contentMarkdown', e.target.value)}
+                              rows={3}
+                              className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 resize-none"
+                            />
+                          </div>
                         </div>
                       </div>
+
+                      {/* Packages Editor for this Section (e.g. Пакет «Будний Драйв», «Выходной VIP», «Мега-Полигон») */}
+                      {sec.id !== 'home' && sec.id !== 'contacts' && (
+                        <div className="pt-4 border-t border-zinc-800/80 space-y-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                              <h6 className="text-xs font-black text-orange-400 uppercase tracking-wider">
+                                Тарифы / Пакеты «Под ключ» в разделе «{sec.title}» ({(sec.packages || []).length})
+                              </h6>
+                              <p className="text-[11px] text-zinc-400">
+                                Редактируйте название пакета, длительность, кол-во игроков, список включенных услуг и итоговую стоимость.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleAddPackageToSection(sec.id)}
+                              className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-orange-500/40 text-orange-400 text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-auto shrink-0"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              Добавить пакет
+                            </button>
+                          </div>
+
+                          {(sec.packages || []).length === 0 ? (
+                            <div className="text-xs text-zinc-500 bg-zinc-900/40 border border-zinc-800/80 border-dashed rounded-xl p-4 text-center">
+                              В этом разделе пока нет карточек пакетов. Нажмите «Добавить пакет», чтобы создать тариф.
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                              {(sec.packages || []).map((pkg) => (
+                                <div
+                                  key={pkg.id}
+                                  className={`bg-zinc-900/90 border rounded-xl p-4 space-y-3 flex flex-col justify-between ${
+                                    pkg.isPopular ? 'border-orange-500/60' : 'border-zinc-800'
+                                  }`}
+                                >
+                                  <div className="space-y-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <label className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-orange-400 cursor-pointer select-none">
+                                        <input
+                                          type="checkbox"
+                                          checked={Boolean(pkg.isPopular)}
+                                          onChange={(e) =>
+                                            handleUpdatePackageInSection(sec.id, pkg.id, (p) => ({
+                                              ...p,
+                                              isPopular: e.target.checked,
+                                            }))
+                                          }
+                                          className="rounded border-zinc-700 bg-zinc-950 text-orange-500 h-3.5 w-3.5"
+                                        />
+                                        Хит выбора ★
+                                      </label>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeletePackageFromSection(sec.id, pkg.id)}
+                                        className="text-zinc-500 hover:text-red-400 p-1 rounded transition-colors cursor-pointer"
+                                        title="Удалить пакет"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[9px] font-black text-zinc-400 uppercase mb-1">
+                                        Название пакета
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={pkg.name}
+                                        onChange={(e) =>
+                                          handleUpdatePackageInSection(sec.id, pkg.id, (p) => ({
+                                            ...p,
+                                            name: e.target.value,
+                                          }))
+                                        }
+                                        className="w-full bg-zinc-950 text-xs font-bold text-white border border-zinc-800 rounded-lg px-2.5 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                      />
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="block text-[9px] font-black text-zinc-400 uppercase mb-1">
+                                          Длительность
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={pkg.duration}
+                                          onChange={(e) =>
+                                            handleUpdatePackageInSection(sec.id, pkg.id, (p) => ({
+                                              ...p,
+                                              duration: e.target.value,
+                                            }))
+                                          }
+                                          placeholder="2 часа"
+                                          className="w-full bg-zinc-950 text-xs text-white border border-zinc-800 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[9px] font-black text-zinc-400 uppercase mb-1">
+                                          Игроков
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={pkg.playersCount}
+                                          onChange={(e) =>
+                                            handleUpdatePackageInSection(sec.id, pkg.id, (p) => ({
+                                              ...p,
+                                              playersCount: e.target.value,
+                                            }))
+                                          }
+                                          placeholder="до 10 игроков"
+                                          className="w-full bg-zinc-950 text-xs text-white border border-zinc-800 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                        />
+                                      </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="block text-[9px] font-black text-orange-400 uppercase mb-1">
+                                          Стоимость (₽)
+                                        </label>
+                                        <input
+                                          type="number"
+                                          value={pkg.price}
+                                          onChange={(e) =>
+                                            handleUpdatePackageInSection(sec.id, pkg.id, (p) => ({
+                                              ...p,
+                                              price: Number(e.target.value) || 0,
+                                            }))
+                                          }
+                                          className="w-full bg-zinc-950 text-xs font-black text-orange-400 border border-zinc-800 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[9px] font-black text-zinc-400 uppercase mb-1">
+                                          Старая цена (₽)
+                                        </label>
+                                        <input
+                                          type="number"
+                                          value={pkg.oldPrice || ''}
+                                          onChange={(e) =>
+                                            handleUpdatePackageInSection(sec.id, pkg.id, (p) => ({
+                                              ...p,
+                                              oldPrice: e.target.value ? Number(e.target.value) : undefined,
+                                            }))
+                                          }
+                                          placeholder="Необязательно"
+                                          className="w-full bg-zinc-950 text-xs text-zinc-300 border border-zinc-800 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                        />
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[9px] font-black text-zinc-400 uppercase mb-1">
+                                        Что входит в пакет (каждый пункт с новой строки)
+                                      </label>
+                                      <textarea
+                                        rows={6}
+                                        value={(pkg.features || []).join('\n')}
+                                        onChange={(e) =>
+                                          handleUpdatePackageInSection(sec.id, pkg.id, (p) => ({
+                                            ...p,
+                                            features: e.target.value.split('\n'),
+                                          }))
+                                        }
+                                        placeholder="2 часа активной игры в лазертаг&#10;Профессиональный ведущий-инструктор..."
+                                        className="w-full bg-zinc-950 text-xs text-zinc-200 border border-zinc-800 rounded-lg px-2.5 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 leading-relaxed"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1900,23 +2314,125 @@ export default function AdminPanel({
               </div>
             )}
 
-            {/* TAB 4: Contact Settings */}
+            {/* TAB 4: Contact Settings, Booking Button Links & Telegram Bot */}
             {activeTab === 'contacts' && (
               <form
                 onSubmit={async (e) => {
                   e.preventDefault();
-                  try {
-                    await dbSaveContacts(localContacts);
-                    showToast('Контакты и промо-бейдж сохранены на сайте!');
-                  } catch (err) {
-                    console.error(err);
-                  }
+                  await handleSaveContactsNow('Контакты, ссылки кнопок и настройки Telegram сохранены!');
                 }}
                 className="space-y-6"
               >
                 <div>
-                  <h4 className="text-sm font-black text-white uppercase tracking-wider mb-1">Редактор контактной информации</h4>
-                  <p className="text-xs text-zinc-400">Обновите ваши номера телефонов, адрес, рабочие часы, промо-бейдж и ссылку на карту.</p>
+                  <h4 className="text-sm font-black text-white uppercase tracking-wider mb-1">
+                    Редактор контактов, ссылок бронирования и Telegram-бота
+                  </h4>
+                  <p className="text-xs text-zinc-400">
+                    Настройте ссылки для кнопок «Забронировать в Макс», «Забронировать в Вацап», «Забронировать на сайте», иконки в подвале и получение заявок в Telegram.
+                  </p>
+                </div>
+
+                {/* Booking Buttons Links (Max, WhatsApp, Site) */}
+                <div className="bg-zinc-950 border border-orange-500/40 rounded-2xl p-5 space-y-4">
+                  <h5 className="text-xs font-black text-orange-400 uppercase tracking-wider">
+                    Ссылки кнопок бронирования (на главном экране и в подвале сайта)
+                  </h5>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-zinc-300 uppercase tracking-wider mb-1">
+                        Ссылка «Забронировать в Макс»
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="https://clck.ru/3WWJke"
+                        value={localContacts.maxUrl || ''}
+                        onChange={(e) => setLocalContacts(prev => ({ ...prev, maxUrl: e.target.value }))}
+                        className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-zinc-300 uppercase tracking-wider mb-1">
+                        Ссылка «Забронировать в Вацап»
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="https://clck.ru/3WsHUN"
+                        value={localContacts.whatsappUrl || ''}
+                        onChange={(e) => setLocalContacts(prev => ({ ...prev, whatsappUrl: e.target.value }))}
+                        className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-zinc-300 uppercase tracking-wider mb-1">
+                        Ссылка «Забронировать на сайте»
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Пусто = форма заявки на сайте (в ТГ)"
+                        value={localContacts.siteBookingUrl || ''}
+                        onChange={(e) => setLocalContacts(prev => ({ ...prev, siteBookingUrl: e.target.value }))}
+                        className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                      />
+                      <span className="block text-[10px] text-zinc-500 mt-1">
+                        Если оставить пустым, открывается форма бронирования на сайте (заявка падает в ТГ и в раздел «Заявки»).
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Telegram Bot Notifications Settings */}
+                <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-5 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h5 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <Send className="w-4 h-4 text-orange-500" />
+                        Отправка заявок с сайта в Telegram («Заявка падает в ТГ»)
+                      </h5>
+                      <p className="text-[11px] text-zinc-400 mt-0.5">
+                        Укажите токен вашего Telegram-бота (от @BotFather) и Chat ID получателя или группы, куда должны приходить заявки.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isTestingTelegram}
+                      onClick={handleTestTelegram}
+                      className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-orange-500/40 text-orange-400 text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-auto shrink-0"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      {isTestingTelegram ? 'Отправка...' : 'Проверить отправку в ТГ'}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                        Telegram Bot Token
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Например: 7123456789:AAH..."
+                        value={localContacts.telegramBotToken || ''}
+                        onChange={(e) => setLocalContacts(prev => ({ ...prev, telegramBotToken: e.target.value }))}
+                        className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-orange-500 font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                        Telegram Chat ID (ID чата или группы)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Например: -1001234567890 или 123456789"
+                        value={localContacts.telegramChatId || ''}
+                        onChange={(e) => setLocalContacts(prev => ({ ...prev, telegramChatId: e.target.value }))}
+                        className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-orange-500 font-mono"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2004,7 +2520,7 @@ export default function AdminPanel({
                     type="submit"
                     className="bg-orange-600 hover:bg-orange-500 text-white px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer"
                   >
-                    Сохранить контакты
+                    Сохранить контакты и ссылки
                   </button>
                 </div>
               </form>
@@ -2039,7 +2555,7 @@ export default function AdminPanel({
                     {editingReelId ? 'Редактировать VK Клип / Ролик' : 'Добавить новый VK Клип / Reels'}
                   </h5>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-1">Название ролика *</label>
                       <input
@@ -2085,9 +2601,6 @@ export default function AdminPanel({
                         </div>
                       )}
                     </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-1">Тег / Категория</label>
                       <select
@@ -2101,15 +2614,6 @@ export default function AdminPanel({
                         <option value="Атмосфера">Атмосфера</option>
                         <option value="Отзывы">Отзывы</option>
                       </select>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-1">Длительность</label>
-                      <input
-                        type="text"
-                        value={reelForm.duration || '0:15'}
-                        onChange={(e) => setReelForm(prev => ({ ...prev, duration: e.target.value }))}
-                        className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-orange-500"
-                      />
                     </div>
                   </div>
 
@@ -2211,7 +2715,7 @@ export default function AdminPanel({
                         type="button"
                         onClick={() => {
                           setEditingReelId(null);
-                          setReelForm({ title: '', videoUrl: '', thumbnailUrl: '', likes: 120, plays: '1.5K', duration: '0:15', tag: 'Общее' });
+                          setReelForm({ title: '', videoUrl: '', thumbnailUrl: '', likes: 120, plays: '1.5K', duration: '', tag: 'Общее' });
                         }}
                         className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
                       >
@@ -2269,10 +2773,10 @@ export default function AdminPanel({
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between border-t border-zinc-800/80 pt-3">
-                          <span className="text-[10px] text-zinc-400 font-mono">Длительность: {rl.duration}</span>
+                        <div className="flex items-center justify-end border-t border-zinc-800/80 pt-3">
                           <div className="flex items-center gap-1.5">
                             <button
+                              type="button"
                               onClick={() => handleEditReel(rl)}
                               className="w-7 h-7 rounded bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 flex items-center justify-center text-zinc-300 hover:text-orange-400 transition-all cursor-pointer"
                               title="Редактировать"
@@ -2280,6 +2784,7 @@ export default function AdminPanel({
                               <Edit className="w-3.5 h-3.5" />
                             </button>
                             <button
+                              type="button"
                               onClick={() => handleDeleteReel(rl.id)}
                               className="w-7 h-7 rounded bg-red-950/20 border border-red-900/30 hover:bg-red-900 flex items-center justify-center text-red-400 hover:text-white transition-all cursor-pointer"
                               title="Удалить"
@@ -2301,7 +2806,7 @@ export default function AdminPanel({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <h4 className="text-sm font-black text-white uppercase tracking-wider mb-1">Менеджер заявок и праздников</h4>
-                    <p className="text-xs text-zinc-400">Просматривайте, фильтруйте, обновляйте статус обработки и выгружайте входящие заявки в Excel.</p>
+                    <p className="text-xs text-zinc-400">Просматривайте входящие заявки с сайта, настраивайте отправку в Telegram и выгружайте в Excel.</p>
                   </div>
                   <button
                     onClick={handleExportLeadsToExcel}
@@ -2310,6 +2815,49 @@ export default function AdminPanel({
                     <Download className="w-4 h-4" />
                     Экспорт в Excel
                   </button>
+                </div>
+
+                {/* Quick Telegram Bot Config in Leads Tab */}
+                <div className="bg-zinc-950 border border-orange-500/30 rounded-2xl p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="text-xs font-black text-orange-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Send className="w-3.5 h-3.5 text-orange-500" />
+                      Куда падают заявки в Telegram (Bot Token и Chat ID)
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={isTestingTelegram}
+                        onClick={handleTestTelegram}
+                        className="px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-orange-500/40 text-orange-400 text-[11px] font-bold transition-colors cursor-pointer"
+                      >
+                        {isTestingTelegram ? 'Проверка...' : 'Тест в Telegram'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSaveContactsNow('Настройки Telegram для заявок сохранены!')}
+                        className="px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-[11px] font-black uppercase tracking-wider transition-colors cursor-pointer"
+                      >
+                        Сохранить ТГ
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      placeholder="Telegram Bot Token (например 7123456789:AAH...)"
+                      value={localContacts.telegramBotToken || ''}
+                      onChange={(e) => setLocalContacts(prev => ({ ...prev, telegramBotToken: e.target.value }))}
+                      className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 font-mono"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Telegram Chat ID (например -100123456789)"
+                      value={localContacts.telegramChatId || ''}
+                      onChange={(e) => setLocalContacts(prev => ({ ...prev, telegramChatId: e.target.value }))}
+                      className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 font-mono"
+                    />
+                  </div>
                 </div>
 
                 {/* Filters */}
@@ -2371,8 +2919,13 @@ export default function AdminPanel({
                           }`}
                         >
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800/60 mb-4">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <h5 className="text-sm font-black text-white">{l.name}</h5>
+                              {l.district && (
+                                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-orange-500/15 border border-orange-500/30 text-orange-400">
+                                  {l.district}
+                                </span>
+                              )}
                               <span className="text-[10px] text-zinc-500 font-mono">
                                 от {new Date(l.createdAt).toLocaleDateString('ru-RU')} в {new Date(l.createdAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                               </span>
@@ -2405,13 +2958,21 @@ export default function AdminPanel({
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
                             <div>
                               <span className="block text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-1">Номер телефона</span>
                               <a href={`tel:${l.phone}`} className="text-xs font-bold text-white hover:text-orange-400 transition-colors flex items-center gap-1.5 font-mono">
                                 <Phone className="w-3.5 h-3.5 text-orange-500" />
                                 {l.phone}
                               </a>
+                            </div>
+
+                            <div>
+                              <span className="block text-[9px] font-black text-zinc-500 uppercase tracking-wider mb-1">Район</span>
+                              <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                                <MapPin className="w-3.5 h-3.5 text-orange-500" />
+                                {l.district || 'Сочи'}
+                              </div>
                             </div>
 
                             <div>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Mail, Phone, MapPin, ExternalLink } from 'lucide-react';
+import { Mail, Phone, MapPin, ExternalLink, MessageCircle } from 'lucide-react';
 import { ContactInfo } from '../types';
 import { useTransparentLogo } from '../lib/media';
 
@@ -10,13 +10,15 @@ interface FooterProps {
 
 export default function Footer({ contacts, onOpenAdmin }: FooterProps) {
   const logoSrc = useTransparentLogo();
+  const maxUrl = contacts.maxUrl?.trim() || 'https://clck.ru/3WWJke';
+  const whatsappUrl = contacts.whatsappUrl?.trim() || 'https://clck.ru/3WsHUN';
 
   return (
     <footer className="bg-zinc-950 border-t border-zinc-900 py-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pb-8 border-b border-zinc-900">
           
-          {/* Brand Logo & Description */}
+          {/* Brand Logo & Description + Messenger Icons */}
           <div>
             <div className="flex items-center gap-3">
               <img src={logoSrc} alt="Лазер Квест" className="w-11 h-11 object-contain" />
@@ -28,6 +30,33 @@ export default function Footer({ contacts, onOpenAdmin }: FooterProps) {
             <p className="mt-3 text-xs text-zinc-400 leading-relaxed max-w-xs">
               Лазерная перестрелка на ваш праздник! Лесные и тактические лазертаг-дни рождения, выпускные и командные квесты под ключ в Сочи и Адлере.
             </p>
+
+            {/* WhatsApp & Max icons in Footer */}
+            <div className="mt-4 flex items-center gap-3">
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Написать в WhatsApp"
+                className="inline-flex items-center gap-2 bg-zinc-900 hover:bg-orange-500 text-zinc-200 hover:text-white border border-zinc-800 hover:border-orange-500 px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all shadow"
+              >
+                <MessageCircle className="w-4 h-4 text-orange-500 group-hover:text-white shrink-0" />
+                <span>WhatsApp</span>
+              </a>
+
+              <a
+                href={maxUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Написать в Макс"
+                className="inline-flex items-center gap-2 bg-zinc-900 hover:bg-orange-500 text-zinc-200 hover:text-white border border-zinc-800 hover:border-orange-500 px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all shadow"
+              >
+                <span className="w-4 h-4 rounded bg-orange-500 text-zinc-950 font-black text-[10px] flex items-center justify-center shrink-0">
+                  M
+                </span>
+                <span>Макс</span>
+              </a>
+            </div>
           </div>
 
           {/* Quick Contacts */}
@@ -51,7 +80,7 @@ export default function Footer({ contacts, onOpenAdmin }: FooterProps) {
 
           {/* Social and Maps */}
           <div className="space-y-3">
-            <h4 className="text-xs font-black text-zinc-300 uppercase tracking-widest">Мы на картах</h4>
+            <h4 className="text-xs font-black text-zinc-300 uppercase tracking-widest">Мы на картах и в мессенджерах</h4>
             <div className="space-y-2">
               <a 
                 href="https://yandex.ru/maps/org/lazertag_kvest/156008228304/reviews"
@@ -93,3 +122,4 @@ export default function Footer({ contacts, onOpenAdmin }: FooterProps) {
     </footer>
   );
 }
+

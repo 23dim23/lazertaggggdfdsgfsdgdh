@@ -1,25 +1,36 @@
 import React from 'react';
-import { Play, Flame, ChevronDown, Crosshair, Gift, Users } from 'lucide-react';
+import { Flame, ChevronDown, Crosshair, CheckCircle2, MessageCircle } from 'lucide-react';
+import { ContactInfo } from '../types';
+import { DEFAULT_ADVANTAGES } from '../data';
 import { useTransparentLogo } from '../lib/media';
 
 interface HeroProps {
   onExplore: () => void;
   onOpenBooking: () => void;
-  onOpenAtmosphere: () => void;
   heroTitle: string;
   heroSubtitle: string;
   promoBadge?: string;
+  contacts?: ContactInfo;
 }
 
 export default function Hero({ 
   onExplore, 
   onOpenBooking, 
-  onOpenAtmosphere,
   heroTitle,
   heroSubtitle,
-  promoBadge
+  promoBadge,
+  contacts
 }: HeroProps) {
   const logoSrc = useTransparentLogo();
+
+  const maxUrl = contacts?.maxUrl?.trim() || 'https://clck.ru/3WWJke';
+  const whatsappUrl = contacts?.whatsappUrl?.trim() || 'https://clck.ru/3WsHUN';
+  const siteBookingUrl = contacts?.siteBookingUrl?.trim() || '';
+
+  const advantagesList =
+    contacts?.advantages && contacts.advantages.length > 0
+      ? contacts.advantages
+      : DEFAULT_ADVANTAGES;
 
   return (
     <div className="relative min-h-[85vh] flex items-center justify-center bg-zinc-950 overflow-hidden py-14 sm:py-20 border-b border-zinc-900">
@@ -76,59 +87,82 @@ export default function Hero({
           {heroSubtitle}
         </p>
 
-        {/* Action Button Cluster */}
-        <div className="mt-9 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-4 w-full max-w-md sm:max-w-none">
-          <button
-            onClick={onOpenBooking}
-            className="bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-amber-500 text-white text-sm font-black uppercase tracking-wider px-8 py-4 rounded-xl transition-all shadow-xl shadow-orange-950/60 flex items-center justify-center gap-2.5 cursor-pointer"
+        {/* 3 Action Booking Buttons (Max, WhatsApp, Site) */}
+        <div className="mt-9 flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center justify-center gap-3.5 w-full max-w-md sm:max-w-4xl">
+          {/* 1. Забронировать в Макс */}
+          <a
+            href={maxUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-zinc-900 hover:bg-zinc-800 text-white border border-orange-500/50 hover:border-orange-500 text-xs sm:text-sm font-black uppercase tracking-wider px-6 py-4 rounded-xl transition-all shadow-lg shadow-black/40 flex items-center justify-center gap-2.5 cursor-pointer"
           >
-            <Crosshair className="w-5 h-5" />
-            Рассчитать праздник
-          </button>
+            <span className="w-5 h-5 rounded-md bg-orange-500 text-zinc-950 font-black text-[11px] flex items-center justify-center shrink-0">
+              M
+            </span>
+            <span>Забронировать в Макс</span>
+          </a>
 
-          <button
-            onClick={onOpenAtmosphere}
-            className="bg-zinc-900 hover:bg-zinc-800 text-zinc-100 border border-zinc-700 hover:border-orange-500/50 text-sm font-black uppercase tracking-wider px-8 py-4 rounded-xl transition-all flex items-center justify-center gap-2.5 cursor-pointer"
+          {/* 2. Забронировать в Вацап */}
+          <a
+            href={whatsappUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-zinc-900 hover:bg-zinc-800 text-white border border-orange-500/50 hover:border-orange-500 text-xs sm:text-sm font-black uppercase tracking-wider px-6 py-4 rounded-xl transition-all shadow-lg shadow-black/40 flex items-center justify-center gap-2.5 cursor-pointer"
           >
-            <div className="w-6 h-6 rounded-full bg-orange-500/20 border border-orange-500 flex items-center justify-center">
-              <Play className="w-3.5 h-3.5 text-orange-400 fill-current ml-0.5" />
-            </div>
-            Смотреть VK Клипы
-          </button>
+            <MessageCircle className="w-5 h-5 text-orange-500 shrink-0" />
+            <span>Забронировать в Вацап</span>
+          </a>
+
+          {/* 3. Забронировать на сайте */}
+          {siteBookingUrl ? (
+            <a
+              href={siteBookingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-amber-500 text-white text-xs sm:text-sm font-black uppercase tracking-wider px-7 py-4 rounded-xl transition-all shadow-xl shadow-orange-950/60 flex items-center justify-center gap-2.5 cursor-pointer"
+            >
+              <Crosshair className="w-5 h-5 shrink-0" />
+              <span>Забронировать на сайте</span>
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={onOpenBooking}
+              className="bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-amber-500 text-white text-xs sm:text-sm font-black uppercase tracking-wider px-7 py-4 rounded-xl transition-all shadow-xl shadow-orange-950/60 flex items-center justify-center gap-2.5 cursor-pointer"
+            >
+              <Crosshair className="w-5 h-5 shrink-0" />
+              <span>Забронировать на сайте</span>
+            </button>
+          )}
         </div>
 
-        {/* Tactical Feature Cards (Gray / Orange / Black) */}
-        <div className="mt-14 grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-4xl w-full">
-          <div className="bg-zinc-900/70 border border-zinc-800 hover:border-orange-500/40 p-6 rounded-2xl flex flex-col items-center text-center transition-colors">
-            <div className="w-11 h-11 bg-orange-950/50 border border-orange-500/30 text-orange-400 rounded-xl flex items-center justify-center mb-4">
-              <Gift className="w-5 h-5" />
+        {/* Editable Advantages Section */}
+        {advantagesList.length > 0 && (
+          <div className="mt-14 w-full max-w-5xl bg-zinc-900/60 border border-zinc-800 rounded-2xl p-6 sm:p-8 text-left shadow-xl">
+            <div className="flex items-center justify-center sm:justify-start gap-2 mb-6">
+              <div className="w-2 h-6 bg-orange-500 rounded-full" />
+              <h2 className="text-lg sm:text-xl font-black text-white uppercase tracking-wider">
+                Наши <span className="text-orange-500">преимущества</span>
+              </h2>
             </div>
-            <h3 className="text-white text-sm font-extrabold uppercase tracking-wider">Праздник «Под Ключ»</h3>
-            <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
-              Квесты, беседки с мангалом, шоу-программы и подарки. Всё организовано за вас.
-            </p>
-          </div>
 
-          <div className="bg-zinc-900/70 border border-zinc-800 hover:border-orange-500/40 p-6 rounded-2xl flex flex-col items-center text-center transition-colors">
-            <div className="w-11 h-11 bg-zinc-800 border border-zinc-700 text-zinc-200 rounded-xl flex items-center justify-center mb-4">
-              <Users className="w-5 h-5 text-orange-400" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4">
+              {advantagesList.map((adv, index) => (
+                <div
+                  key={index}
+                  className="flex items-start gap-3 bg-zinc-950/80 border border-zinc-800/90 hover:border-orange-500/40 rounded-xl p-3.5 sm:p-4 transition-colors"
+                >
+                  <div className="w-6 h-6 rounded-lg bg-orange-500/15 border border-orange-500/40 flex items-center justify-center shrink-0 mt-0.5">
+                    <CheckCircle2 className="w-4 h-4 text-orange-500" />
+                  </div>
+                  <span className="text-xs sm:text-sm font-bold text-zinc-100 leading-snug">
+                    {adv.replace(/^✅\s*/, '')}
+                  </span>
+                </div>
+              ))}
             </div>
-            <h3 className="text-white text-sm font-extrabold uppercase tracking-wider">Игры от 6 до 60 лет</h3>
-            <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
-              Индивидуальные сценарии по возрасту: от детских миссий до взрослых спец-операций.
-            </p>
           </div>
-
-          <div className="bg-zinc-900/70 border border-zinc-800 hover:border-orange-500/40 p-6 rounded-2xl flex flex-col items-center text-center transition-colors">
-            <div className="w-11 h-11 bg-orange-950/50 border border-orange-500/30 text-orange-400 rounded-xl flex items-center justify-center mb-4">
-              <Crosshair className="w-5 h-5" />
-            </div>
-            <h3 className="text-white text-sm font-extrabold uppercase tracking-wider">Новое снаряжение</h3>
-            <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
-              Легкие беспроводные тагеры, сенсорная экипировка и электронные базы захвата.
-            </p>
-          </div>
-        </div>
+        )}
 
         {/* Bottom Scroll Action */}
         <button 
@@ -144,3 +178,4 @@ export default function Hero({
     </div>
   );
 }
+
