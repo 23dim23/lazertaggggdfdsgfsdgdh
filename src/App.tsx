@@ -8,8 +8,10 @@ import ReviewsBlock from './components/ReviewsBlock';
 import Footer from './components/Footer';
 import BookingModal from './components/BookingModal';
 import AdminPanel from './components/AdminPanel';
+import SeoLandingPage from './components/SeoLandingPage';
 
 import { Section, Service, Review, ContactInfo, AdminSettings, Reel } from './types';
+import { getSeoPageBySlug, SeoPageData, SITE_DOMAIN } from './data/seoPages';
 import { 
   INITIAL_SECTIONS, 
   INITIAL_SERVICES, 
@@ -36,9 +38,29 @@ import {
 } from './lib/db';
 import { resolveServiceImage, resolveReelThumbnail, useTransparentLogo } from './lib/media';
 
+const SECTION_SLUGS = new Set(['birthdays', 'corporates', 'graduations', 'open-games', 'outdoor', 'contacts']);
+
+function resolveInitialRoute(): { sectionId: string; seoPage: SeoPageData | null } {
+  if (typeof window === 'undefined') return { sectionId: 'home', seoPage: null };
+  const cleanPath = window.location.pathname.replace(/^\/+|\/+$/g, '').toLowerCase();
+  if (!cleanPath) return { sectionId: 'home', seoPage: null };
+
+  const matchedSeo = getSeoPageBySlug(cleanPath);
+  if (matchedSeo) return { sectionId: 'home', seoPage: matchedSeo };
+
+  if (SECTION_SLUGS.has(cleanPath)) {
+    return { sectionId: cleanPath, seoPage: null };
+  }
+
+  return { sectionId: 'home', seoPage: null };
+}
+
 export default function App() {
+  const initialRoute = resolveInitialRoute();
+
   // Navigation State
-  const [activeSectionId, setActiveSectionId] = useState<string>('home');
+  const [activeSectionId, setActiveSectionId] = useState<string>(initialRoute.sectionId);
+  const [activeSeoPage, setActiveSeoPage] = useState<SeoPageData | null>(initialRoute.seoPage);
 
   // Core App Content States
   const [sections, setSections] = useState<Section[]>(INITIAL_SECTIONS);
@@ -56,6 +78,7 @@ export default function App() {
   const [isBookingOpen, setIsBookingOpen] = useState(false);
   const [selectedBookingPackage, setSelectedBookingPackage] = useState<string | undefined>(undefined);
   const [selectedBookingPrice, setSelectedBookingPrice] = useState<number | undefined>(undefined);
+  const [selectedBookingDistrict, setSelectedBookingDistrict] = useState<string | undefined>(undefined);
 
   const logoSrc = useTransparentLogo();
 
@@ -267,15 +290,17 @@ export default function App() {
   };
 
   // Trigger booking modal for a specific package/service
-  const handleBookPackage = (packageName: string, price?: number) => {
+  const handleBookPackage = (packageName?: string, price?: number, district?: string) => {
     setSelectedBookingPackage(packageName);
     setSelectedBookingPrice(price);
+    setSelectedBookingDistrict(district || activeSeoPage?.district);
     setIsBookingOpen(true);
   };
 
   const handleOpenGeneralBooking = () => {
     setSelectedBookingPackage(undefined);
     setSelectedBookingPrice(undefined);
+    setSelectedBookingDistrict(activeSeoPage?.district);
     setIsBookingOpen(true);
   };
 
@@ -285,9 +310,79 @@ export default function App() {
     if (el) el.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // Sync browser back/forward button with SEO landing pages and sections
+  useEffect(() => {
+    const onPopState = () => {
+      const next = resolveInitialRoute();
+      setActiveSectionId(next.sectionId);
+      setActiveSeoPage(next.seoPage);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  // Dynamically update document title, meta description and canonical link
+  useEffect(() => {
+    const setMeta = (selector: string, content: string) => {
+      const el = document.querySelector(selector);
+      if (el) el.setAttribute('content', content);
+    };
+
+    if (activeSeoPage) {
+      document.title = activeSeoPage.title;
+      setMeta('meta[name="description"]', activeSeoPage.metaDescription);
+      setMeta('meta[property="og:title"]', activeSeoPage.title);
+      setMeta('meta[property="og:description"]', activeSeoPage.metaDescription);
+      setMeta('meta[property="og:url"]', `${SITE_DOMAIN}/${activeSeoPage.slug}/`);
+      const canonical = document.querySelector('link[rel="canonical"]');
+      if (canonical) canonical.setAttribute('href', `${SITE_DOMAIN}/${activeSeoPage.slug}/`);
+    } else {
+      const sec = sections.find((s) => s.id === activeSectionId);
+      const isHome = activeSectionId === 'home' || !sec;
+      const title = isHome
+        ? 'Лазер Квест — Лазертаг в Сочи, Адлере, Дагомысе и Красной Поляне'
+        : `${sec.title} — Лазер Квест в Сочи и Адлере`;
+      const desc = isHome
+        ? 'Лазертаг-клуб «Лазер Квест» в Сочи и Адлере: более 15 площадок, детские дни рождения под ключ от 6 лет, корпоративы, выпускные, беседки с мангалом и игры без боли.'
+        : sec.description || sec.heroSubtitle;
+      const url = isHome ? `${SITE_DOMAIN}/` : `${SITE_DOMAIN}/${sec.id}`;
+
+      document.title = title;
+      setMeta('meta[name="description"]', desc);
+      setMeta('meta[property="og:title"]', title);
+      setMeta('meta[property="og:description"]', desc);
+      setMeta('meta[property="og:url"]', url);
+      const canonical = document.querySelector('link[rel="canonical"]');
+      if (canonical) canonical.setAttribute('href', url);
+    }
+  }, [activeSeoPage, activeSectionId, sections]);
+
   // Scroll to active section container helper
   const handleSectionChange = (id: string) => {
+    setActiveSeoPage(null);
     setActiveSectionId(id);
+    try {
+      const targetUrl = id === 'home' ? '/' : `/${id}`;
+      if (window.location.pathname !== targetUrl) {
+        window.history.pushState(null, '', targetUrl);
+      }
+    } catch {
+      // Ignore history API restrictions in sandboxed environments
+    }
+    setTimeout(() => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, 50);
+  };
+
+  const handleNavigateSeoPage = (slug: string) => {
+    const page = getSeoPageBySlug(slug);
+    if (!page) return;
+    setActiveSeoPage(page);
+    try {
+      window.history.pushState(null, '', `/${page.slug}/`);
+    } catch {
+      // Ignore history API restrictions
+    }
     setTimeout(() => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }, 50);
@@ -347,14 +442,23 @@ export default function App() {
       {/* Interactive Global Laser Quest Header */}
       <Navbar 
         sections={sections}
-        activeSectionId={activeSectionId}
+        activeSectionId={activeSeoPage ? '' : activeSectionId}
         onSectionChange={handleSectionChange}
         onOpenAdmin={() => setIsAdminOpen(true)}
         onOpenBooking={handleOpenGeneralBooking}
       />
 
-      {/* Conditional page render based on selected navigation tab */}
-      {activeSectionId === 'home' && currentSection ? (
+      {/* Conditional page render: hidden-from-menu SEO landing page OR standard section */}
+      {activeSeoPage ? (
+        <SeoLandingPage
+          page={activeSeoPage}
+          contacts={contacts}
+          sections={sections}
+          onBookPackage={handleBookPackage}
+          onNavigateHome={() => handleSectionChange('home')}
+          onNavigateSeoPage={handleNavigateSeoPage}
+        />
+      ) : activeSectionId === 'home' && currentSection ? (
         <>
           {/* Hero Banner Section */}
           <Hero 
@@ -401,7 +505,9 @@ export default function App() {
         onClose={() => setIsBookingOpen(false)}
         packageName={selectedBookingPackage}
         packagePrice={selectedBookingPrice}
+        defaultDistrict={selectedBookingDistrict}
         contacts={contacts}
+        onContactsUpdated={setContacts}
       />
 
       {/* Passcode protected Administration Dashboard */}

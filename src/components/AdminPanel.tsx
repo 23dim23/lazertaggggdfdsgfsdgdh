@@ -7,7 +7,7 @@ import {
 import * as XLSX from 'xlsx';
 import { Section, Service, Review, ContactInfo, AdminSettings, Reel, Lead, Package } from '../types';
 import { DEFAULT_ADVANTAGES } from '../data';
-import { sendTestTelegramMessage } from '../lib/telegram';
+import { sendTestTelegramMessage, discoverTelegramSubscribers } from '../lib/telegram';
 import { 
   getLeads, saveLead, deleteLead, 
   saveService as dbSaveService, deleteService as dbDeleteService,
@@ -76,8 +76,10 @@ export default function AdminPanel({
   };
 
   useEffect(() => {
-    const session = localStorage.getItem('admin_session');
-    if (session === 'true') {
+    // Invalidate legacy sessions created with old passwords
+    localStorage.removeItem('admin_session');
+    const session = localStorage.getItem('admin_session_v2');
+    if (session === 'authorized_q3dm17') {
       setIsAuthenticated(true);
     }
   }, []);
@@ -131,6 +133,10 @@ export default function AdminPanel({
     maxUrl: settings.contacts.maxUrl || 'https://clck.ru/3WWJke',
     whatsappUrl: settings.contacts.whatsappUrl || 'https://clck.ru/3WsHUN',
     siteBookingUrl: settings.contacts.siteBookingUrl || '',
+    telegramBroadcastAll: settings.contacts.telegramBroadcastAll !== false,
+    telegramSubscribers: Array.isArray(settings.contacts.telegramSubscribers)
+      ? [...settings.contacts.telegramSubscribers]
+      : [],
     advantages:
       settings.contacts.advantages && settings.contacts.advantages.length > 0
         ? [...settings.contacts.advantages]
@@ -146,6 +152,7 @@ export default function AdminPanel({
   const [localLeads, setLocalLeads] = useState<Lead[]>([]);
   const [isLoadingLeads, setIsLoadingLeads] = useState(false);
   const [isTestingTelegram, setIsTestingTelegram] = useState(false);
+  const [isSyncingSubscribers, setIsSyncingSubscribers] = useState(false);
 
   // Form states for adding/editing sections, services, reviews, reels
   const [showSectionAddForm, setShowSectionAddForm] = useState(false);
@@ -210,10 +217,10 @@ export default function AdminPanel({
   // Handle Admin login
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === 'laserkvest2026' || password === 'admin' || password === '1234') {
+    if (password === 'q3dm17LAZERTAG!') {
       setIsAuthenticated(true);
       setErrorMsg('');
-      localStorage.setItem('admin_session', 'true');
+      localStorage.setItem('admin_session_v2', 'authorized_q3dm17');
     } else {
       setErrorMsg('Неверный пароль администратора.');
     }
@@ -351,21 +358,83 @@ export default function AdminPanel({
     }
   };
 
+  const handleSyncTelegramSubscribers = async () => {
+    if (!localContacts.telegramBotToken?.trim()) {
+      showToast('Сначала вставьте Telegram Bot Token от @BotFather!');
+      return;
+    }
+    setIsSyncingSubscribers(true);
+    try {
+      const res = await discoverTelegramSubscribers(
+        localContacts.telegramBotToken,
+        localContacts.telegramSubscribers || []
+      );
+      if (!res.ok) {
+        showToast(`Ошибка Telegram: ${res.error}`);
+        return;
+      }
+      const updatedContacts: ContactInfo = {
+        ...localContacts,
+        telegramBroadcastAll: localContacts.telegramBroadcastAll !== false,
+        telegramSubscribers: res.subscribers,
+      };
+      setLocalContacts(updatedContacts);
+      if (onSaveContactsLive) onSaveContactsLive(updatedContacts);
+      await dbSaveContacts(updatedContacts).catch(() => {});
+
+      if (res.subscribers.length === 0) {
+        showToast('Подписчиков пока нет — перейдите в вашего бота в Telegram и нажмите /start!');
+      } else {
+        showToast(
+          res.newCount > 0
+            ? `Найдено новых подписчиков: +${res.newCount} (всего в списке: ${res.subscribers.length})`
+            : `Список актуален: всего подписчиков бота — ${res.subscribers.length}`
+        );
+      }
+    } finally {
+      setIsSyncingSubscribers(false);
+    }
+  };
+
+  const handleRemoveTelegramSubscriber = async (chatId: string) => {
+    const updatedSubscribers = (localContacts.telegramSubscribers || []).filter(
+      (s) => String(s.chatId) !== String(chatId)
+    );
+    const updatedContacts: ContactInfo = {
+      ...localContacts,
+      telegramSubscribers: updatedSubscribers,
+    };
+    setLocalContacts(updatedContacts);
+    if (onSaveContactsLive) onSaveContactsLive(updatedContacts);
+    await dbSaveContacts(updatedContacts).catch(() => {});
+    showToast('Подписчик удалён из рассылки заявок.');
+  };
+
   const handleTestTelegram = async () => {
-    if (!localContacts.telegramBotToken?.trim() || !localContacts.telegramChatId?.trim()) {
-      showToast('Заполните Telegram Bot Token и Chat ID для проверки!');
+    if (!localContacts.telegramBotToken?.trim()) {
+      showToast('Укажите Telegram Bot Token от @BotFather для проверки!');
       return;
     }
     setIsTestingTelegram(true);
     try {
-      await dbSaveContacts(localContacts).catch(() => {});
-      if (onSaveContactsLive) onSaveContactsLive(localContacts);
+      const broadcastAll = localContacts.telegramBroadcastAll !== false;
       const res = await sendTestTelegramMessage(
         localContacts.telegramBotToken,
-        localContacts.telegramChatId
+        localContacts.telegramChatId,
+        localContacts.telegramSubscribers || [],
+        broadcastAll
       );
+      const updatedContacts: ContactInfo = {
+        ...localContacts,
+        telegramBroadcastAll: broadcastAll,
+        telegramSubscribers: res.subscribers,
+      };
+      setLocalContacts(updatedContacts);
+      if (onSaveContactsLive) onSaveContactsLive(updatedContacts);
+      await dbSaveContacts(updatedContacts).catch(() => {});
+
       if (res.ok) {
-        showToast('Тестовое сообщение успешно отправлено в Telegram!');
+        showToast(`Тестовое сообщение отправлено! Получателей: ${res.sentCount}`);
       } else {
         showToast(`Ошибка Telegram: ${res.error}`);
       }
@@ -1070,6 +1139,7 @@ export default function AdminPanel({
             <button
               onClick={() => {
                 localStorage.removeItem('admin_session');
+                localStorage.removeItem('admin_session_v2');
                 setIsAuthenticated(false);
                 onClose();
               }}
@@ -2392,24 +2462,35 @@ export default function AdminPanel({
                         Отправка заявок с сайта в Telegram («Заявка падает в ТГ»)
                       </h5>
                       <p className="text-[11px] text-zinc-400 mt-0.5">
-                        Укажите токен вашего Telegram-бота (от @BotFather) и Chat ID получателя или группы, куда должны приходить заявки.
+                        Укажите Bot Token от @BotFather — заявки автоматически придут <strong className="text-zinc-200">каждому, кто запустил бота (/start)</strong>! Chat ID указывать не обязательно.
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      disabled={isTestingTelegram}
-                      onClick={handleTestTelegram}
-                      className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-orange-500/40 text-orange-400 text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-auto shrink-0"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      {isTestingTelegram ? 'Отправка...' : 'Проверить отправку в ТГ'}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        disabled={isSyncingSubscribers}
+                        onClick={handleSyncTelegramSubscribers}
+                        className="px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-orange-500/40 text-zinc-200 hover:text-orange-400 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSubscribers ? 'animate-spin' : ''}`} />
+                        {isSyncingSubscribers ? 'Поиск...' : 'Найти подписчиков'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isTestingTelegram}
+                        onClick={handleTestTelegram}
+                        className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-orange-500/40 text-orange-400 text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        {isTestingTelegram ? 'Отправка...' : 'Проверить отправку в ТГ'}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
-                        Telegram Bot Token
+                        Telegram Bot Token (обязательно)
                       </label>
                       <input
                         type="text"
@@ -2422,15 +2503,62 @@ export default function AdminPanel({
 
                     <div>
                       <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
-                        Telegram Chat ID (ID чата или группы)
+                        Доп. Chat ID (необязательно — можно через запятую)
                       </label>
                       <input
                         type="text"
-                        placeholder="Например: -1001234567890 или 123456789"
+                        placeholder="Оставьте пустым для рассылки всем подписчикам бота"
                         value={localContacts.telegramChatId || ''}
                         onChange={(e) => setLocalContacts(prev => ({ ...prev, telegramChatId: e.target.value }))}
                         className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-orange-500 font-mono"
                       />
+                    </div>
+                  </div>
+
+                  {/* Broadcast toggle & subscribers list */}
+                  <div className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-3.5 space-y-3">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={localContacts.telegramBroadcastAll !== false}
+                        onChange={(e) =>
+                          setLocalContacts(prev => ({ ...prev, telegramBroadcastAll: e.target.checked }))
+                        }
+                        className="w-4 h-4 accent-orange-500 rounded cursor-pointer"
+                      />
+                      <span className="text-xs font-bold text-zinc-200">
+                        Отправлять заявки всем пользователям и группам, которые запустили бота (/start)
+                      </span>
+                    </label>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                        Сохранённые получатели ({(localContacts.telegramSubscribers || []).length}):
+                      </span>
+                      {(localContacts.telegramSubscribers || []).length === 0 ? (
+                        <span className="text-[11px] text-zinc-500">
+                          Пока пусто — откройте бота в Telegram, нажмите «Запустить» (/start) и нажмите «Найти подписчиков»
+                        </span>
+                      ) : (
+                        (localContacts.telegramSubscribers || []).map((sub) => (
+                          <span
+                            key={sub.chatId}
+                            className="inline-flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 text-zinc-200 text-[11px] font-semibold px-2.5 py-1 rounded-lg"
+                          >
+                            <span>{sub.name}</span>
+                            {sub.username && <span className="text-orange-400">@{sub.username}</span>}
+                            <span className="text-zinc-500 font-mono text-[10px]">({sub.chatId})</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveTelegramSubscriber(sub.chatId)}
+                              title="Удалить из рассылки"
+                              className="text-zinc-500 hover:text-red-400 ml-0.5 cursor-pointer"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2820,11 +2948,24 @@ export default function AdminPanel({
                 {/* Quick Telegram Bot Config in Leads Tab */}
                 <div className="bg-zinc-950 border border-orange-500/30 rounded-2xl p-4 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="text-xs font-black text-orange-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <Send className="w-3.5 h-3.5 text-orange-500" />
-                      Куда падают заявки в Telegram (Bot Token и Chat ID)
+                    <div>
+                      <div className="text-xs font-black text-orange-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Send className="w-3.5 h-3.5 text-orange-500" />
+                        Рассылка заявок в Telegram — всем, кто запустил бота (/start)
+                      </div>
+                      <p className="text-[11px] text-zinc-400 mt-0.5">
+                        Достаточно указать только Bot Token. Все менеджеры, нажавшие /start в боте, автоматически получают каждую заявку (подписчиков: {(localContacts.telegramSubscribers || []).length}).
+                      </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        disabled={isSyncingSubscribers}
+                        onClick={handleSyncTelegramSubscribers}
+                        className="px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 hover:text-orange-400 text-[11px] font-bold transition-colors cursor-pointer"
+                      >
+                        {isSyncingSubscribers ? 'Поиск...' : 'Найти подписчиков'}
+                      </button>
                       <button
                         type="button"
                         disabled={isTestingTelegram}
@@ -2852,12 +2993,34 @@ export default function AdminPanel({
                     />
                     <input
                       type="text"
-                      placeholder="Telegram Chat ID (например -100123456789)"
+                      placeholder="Доп. Chat ID (необязательно — бот сам шлёт всем, кто нажал /start)"
                       value={localContacts.telegramChatId || ''}
                       onChange={(e) => setLocalContacts(prev => ({ ...prev, telegramChatId: e.target.value }))}
                       className="w-full bg-zinc-900 text-xs text-white border border-zinc-800 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 font-mono"
                     />
                   </div>
+                  {(localContacts.telegramSubscribers || []).length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <span className="text-[10px] font-bold text-zinc-400 uppercase mr-1">Получатели:</span>
+                      {(localContacts.telegramSubscribers || []).map((sub) => (
+                        <span
+                          key={sub.chatId}
+                          className="inline-flex items-center gap-1 bg-zinc-900 border border-zinc-800 text-zinc-200 text-[10px] font-semibold px-2 py-0.5 rounded-md"
+                        >
+                          {sub.name}
+                          {sub.username ? ` (@${sub.username})` : ''}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveTelegramSubscriber(sub.chatId)}
+                            className="text-zinc-500 hover:text-red-400 ml-0.5 cursor-pointer"
+                            title="Удалить получателя"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Filters */}

@@ -1,33 +1,113 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://laserkvest.ru/</loc>
-    <lastmod>2026-09-20</lastmod>
+    <loc>https://lazertagkvest.ru/</loc>
+    <lastmod>2026-11-19</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://laserkvest.ru/birthdays</loc>
-    <lastmod>2026-09-20</lastmod>
+    <loc>https://lazertagkvest.ru/birthdays</loc>
+    <lastmod>2026-11-19</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://lazertagkvest.ru/corporates</loc>
+    <lastmod>2026-11-19</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://laserkvest.ru/corporates</loc>
-    <lastmod>2026-09-20</lastmod>
+    <loc>https://lazertagkvest.ru/graduations</loc>
+    <lastmod>2026-11-19</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://laserkvest.ru/graduations</loc>
-    <lastmod>2026-09-20</lastmod>
+    <loc>https://lazertagkvest.ru/open-games</loc>
+    <lastmod>2026-11-19</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://laserkvest.ru/open-games</loc>
-    <lastmod>2026-09-20</lastmod>
+    <loc>https://lazertagkvest.ru/outdoor</loc>
+    <lastmod>2026-11-19</lastmod>
     <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.8</priority>
+  </url>
+
+  <!-- 12 SEO-посадочных страниц по районам и форматам -->
+  <url>
+    <loc>https://lazertagkvest.ru/lazertag-sochi/</loc>
+    <lastmod>2026-11-19</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://lazertagkvest.ru/lazertag-adler/</loc>
+    <lastmod>2026-11-19</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://lazertagkvest.ru/lazertag-dagomys/</loc>
+    <lastmod>2026-11-19</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://lazertagkvest.ru/lazertag-krasnaya-polyana/</loc>
+    <lastmod>2026-11-19</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://lazertagkvest.ru/detskiy-den-rozhdeniya-sochi/</loc>
+    <lastmod>2026-11-19</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://lazertagkvest.ru/detskiy-lazertag-adler/</loc>
+    <lastmod>2026-11-19</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://lazertagkvest.ru/korporativ-lazertag-sochi/</loc>
+    <lastmod>2026-11-19</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://lazertagkvest.ru/vypusknoy-lazertag-sochi/</loc>
+    <lastmod>2026-11-19</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://lazertagkvest.ru/vyezdnoy-lazertag-sochi/</loc>
+    <lastmod>2026-11-19</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://lazertagkvest.ru/lazertag-s-besedkoy-mangalom-sochi/</loc>
+    <lastmod>2026-11-19</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://lazertagkvest.ru/kvesty-dlya-detey-sochi/</loc>
+    <lastmod>2026-11-19</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://lazertagkvest.ru/lazertag-dlya-vzroslyh-sochi/</loc>
+    <lastmod>2026-11-19</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
   </url>
 </urlset>

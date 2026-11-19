@@ -293,6 +293,8 @@ export async function getContacts(): Promise<ContactInfo> {
     ...rawLocal,
     maxUrl: rawLocal.maxUrl || DEFAULT_CONTACTS.maxUrl,
     whatsappUrl: rawLocal.whatsappUrl || DEFAULT_CONTACTS.whatsappUrl,
+    telegramBroadcastAll: rawLocal.telegramBroadcastAll !== false,
+    telegramSubscribers: Array.isArray(rawLocal.telegramSubscribers) ? rawLocal.telegramSubscribers : [],
     advantages:
       rawLocal.advantages && rawLocal.advantages.length > 0
         ? rawLocal.advantages
@@ -318,6 +320,8 @@ export async function getContacts(): Promise<ContactInfo> {
       ...dbData,
       maxUrl: dbData.maxUrl || DEFAULT_CONTACTS.maxUrl,
       whatsappUrl: dbData.whatsappUrl || DEFAULT_CONTACTS.whatsappUrl,
+      telegramBroadcastAll: dbData.telegramBroadcastAll !== false,
+      telegramSubscribers: Array.isArray(dbData.telegramSubscribers) ? dbData.telegramSubscribers : [],
       advantages:
         dbData.advantages && dbData.advantages.length > 0
           ? dbData.advantages

@@ -56,6 +56,14 @@ export interface Reel {
   tag: string;
 }
 
+export interface TelegramSubscriber {
+  chatId: string;
+  name: string;
+  username?: string;
+  type?: string;
+  addedAt: string;
+}
+
 export interface ContactInfo {
   phone: string;
   email: string;
@@ -70,6 +78,8 @@ export interface ContactInfo {
   siteBookingUrl?: string;
   telegramBotToken?: string;
   telegramChatId?: string;
+  telegramBroadcastAll?: boolean;
+  telegramSubscribers?: TelegramSubscriber[];
   yandexMetrikaId?: string;
   promoBadge?: string;
   advantages?: string[];

@@ -375,6 +375,8 @@ export const DEFAULT_CONTACTS: ContactInfo = {
   maxUrl: 'https://clck.ru/3WWJke',
   whatsappUrl: 'https://clck.ru/3WsHUN',
   siteBookingUrl: '',
+  telegramBroadcastAll: true,
+  telegramSubscribers: [],
   promoBadge: 'СКИДКА -15% НА ДЕНЬ РОЖДЕНИЯ В БУДНИ!',
   advantages: DEFAULT_ADVANTAGES
 };

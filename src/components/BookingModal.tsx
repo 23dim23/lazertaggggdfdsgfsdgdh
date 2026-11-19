@@ -1,28 +1,44 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Calendar, Users, Phone, User, Check, Flame, MessageSquare, MapPin } from 'lucide-react';
-import { saveLead } from '../lib/db';
+import { saveLead, saveContacts } from '../lib/db';
 import { sendLeadToTelegram } from '../lib/telegram';
-import { Lead, ContactInfo } from '../types';
+import { Lead, ContactInfo, TelegramSubscriber } from '../types';
 
 interface BookingModalProps {
   isOpen: boolean;
   onClose: () => void;
   packageName?: string;
   packagePrice?: number;
+  defaultDistrict?: string;
   contacts?: ContactInfo;
+  onContactsUpdated?: (updated: ContactInfo) => void;
 }
 
 const DISTRICTS = ['Сочи', 'Адлер', 'Дагомыс', 'Красная Поляна'] as const;
 
-export default function BookingModal({ isOpen, onClose, packageName, packagePrice, contacts }: BookingModalProps) {
+export default function BookingModal({
+  isOpen,
+  onClose,
+  packageName,
+  packagePrice,
+  defaultDistrict,
+  contacts,
+  onContactsUpdated,
+}: BookingModalProps) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [district, setDistrict] = useState<string>('Сочи');
+  const [district, setDistrict] = useState<string>(defaultDistrict || 'Сочи');
   const [date, setDate] = useState('');
   const [guests, setGuests] = useState('10');
   const [comment, setComment] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (defaultDistrict) {
+      setDistrict(defaultDistrict);
+    }
+  }, [defaultDistrict]);
 
   if (!isOpen) return null;
 
@@ -44,10 +60,20 @@ export default function BookingModal({ isOpen, onClose, packageName, packagePric
       status: 'new'
     };
 
+    const handleSubscribersDiscovered = (subscribers: TelegramSubscriber[]) => {
+      if (!contacts) return;
+      const updatedContacts: ContactInfo = {
+        ...contacts,
+        telegramSubscribers: subscribers,
+      };
+      if (onContactsUpdated) onContactsUpdated(updatedContacts);
+      saveContacts(updatedContacts).catch(() => {});
+    };
+
     try {
       await Promise.allSettled([
         saveLead(newLead),
-        sendLeadToTelegram(newLead, contacts),
+        sendLeadToTelegram(newLead, contacts, handleSubscribersDiscovered),
       ]);
       setLoading(false);
       setIsSubmitted(true);
